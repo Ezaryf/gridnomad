@@ -5,6 +5,7 @@ import {
   PROVIDER_OPTIONS,
   addGroup,
   buildRuntimeControllerMap,
+  controllerReadiness,
   normalizeSettings,
   synthesizeScenario
 } from "../lib/civilization-setup.js";
@@ -109,6 +110,7 @@ test("synthesizeScenario expands groups into runtime factions and humans", () =>
   assert.equal(runtimeScenario.generator.width, 80);
   assert.ok(runtimeScenario.factions.some((faction) => faction.id === "manual-keep"));
   assert.ok(runtimeScenario.agents.some((agent) => agent.faction_id === "manual-keep"));
+  assert.ok(runtimeScenario.agents[0].persona_summary !== undefined);
   assert.equal(runtimeScenario.fauna.species.length, 0);
 });
 
@@ -124,6 +126,25 @@ test("runtime controller map resolves groups into faction controller config", ()
   const runtime = buildRuntimeControllerMap(normalized);
   assert.equal(runtime.factions["manual-keep"].provider, "openai");
   assert.equal(runtime.factions["blue-circle"].provider, "gemini-cli");
+});
+
+
+test("opencode groups default to batch execution and humans gain personas", () => {
+  const normalized = normalizeSettings(BASE_SCENARIO, {
+    groups: [
+      { id: "manual-keep", name: "Manual Keep", population_count: 2, controller: { provider: "opencode", cliHome: "C:/tmp/opencode-home" } }
+    ]
+  });
+
+  assert.equal(normalized.groups[0].controller.executionMode, "group_batch");
+  assert.ok(normalized.groups[0].humans[0].persona_summary);
+  assert.ok(normalized.groups[0].humans[0].starting_drive);
+});
+
+
+test("opencode readiness blocks groups without a managed home", () => {
+  const readiness = controllerReadiness({ provider: "opencode", model: "opencode/minimax-m2.5-free" }, null);
+  assert.equal(readiness.state, "home_required");
 });
 
 

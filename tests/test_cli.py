@@ -163,6 +163,17 @@ class CLITests(unittest.TestCase):
     def test_run_stream_fails_fast_when_provider_is_not_ready(self) -> None:
         scenario_path = ROOT / "scenarios" / "river_fork.json"
         scenario = json.loads(scenario_path.read_text(encoding="utf-8"))
+        scenario["agents"] = [
+            {
+                "id": "red-human-01",
+                "name": "Ada",
+                "faction_id": "red",
+                "personality": {"openness": 7, "conscientiousness": 6, "extraversion": 5, "agreeableness": 6, "neuroticism": 3},
+                "emotions": {"Joy": 4, "Sadness": 1, "Fear": 2, "Anger": 1, "Disgust": 0, "Surprise": 3},
+                "needs": {"Survival": 4, "Safety": 4, "Belonging": 5, "Esteem": 4, "Self_Actualization": 5},
+                "inventory": {"food": 2, "wood": 1, "stone": 0},
+            }
+        ]
         scratch_root = ROOT / ".tmp-test-artifacts"
         run_dir = scratch_root / f"strict-fail-{uuid.uuid4().hex}"
         scratch_root.mkdir(exist_ok=True)

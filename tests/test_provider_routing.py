@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from helpers import build_agent, build_world
@@ -129,6 +130,52 @@ class ProviderRoutingTests(unittest.TestCase):
         self.assertIn("openrouter", command)
         self.assertIn("-m", command)
         self.assertIn("opencode/minimax-m2.5-free", command)
+
+    def test_opencode_batch_mode_returns_one_decision_per_human(self) -> None:
+        ada = build_agent("ada", "red", 1, 1)
+        bo = build_agent("bo", "red", 2, 1)
+        _, world, _ = build_world(agents=[ada, bo])
+        contexts = []
+        for agent in (ada, bo):
+            perception = build_perception(world, agent, 2)
+            contexts.append(
+                build_agent_context(
+                    tick=0,
+                    agent=agent,
+                    world=world,
+                    perception=perception,
+                    recent_events=[],
+                    memories=[],
+                    recent_messages={"civilization": [], "diplomacy": []},
+                    cultural_context="Stay close and help each other.",
+                )
+            )
+
+        adapter = RoutingLLMAdapter(
+            CivilizationSettings(
+                factions={
+                    "red": CivilizationProviderConfig(
+                        provider="opencode",
+                        model="opencode/minimax-m2.5-free",
+                        cli_home=str((Path.cwd() / ".tmp-test-artifacts" / "opencode-home").resolve()),
+                        execution_mode="group_batch",
+                    )
+                }
+            )
+        )
+
+        class Completed:
+            returncode = 0
+            stdout = """{"decisions":[{"human_id":"ada","action":"MOVE_EAST","target_x":2,"target_y":1,"reason":"test","intent":"step east","speech":"","updated_emotions":{"Joy":4,"Sadness":1,"Fear":1,"Anger":0,"Disgust":0,"Surprise":1},"updated_needs":{"Survival":4,"Safety":4,"Belonging":4,"Esteem":4,"Self_Actualization":4},"thought":"test"},{"human_id":"bo","action":"REST","target_x":null,"target_y":null,"reason":"test","intent":"rest","speech":"","updated_emotions":{"Joy":4,"Sadness":1,"Fear":1,"Anger":0,"Disgust":0,"Surprise":1},"updated_needs":{"Survival":4,"Safety":4,"Belonging":4,"Esteem":4,"Self_Actualization":4},"thought":"test"}]}"""
+            stderr = ""
+
+        with patch("gridnomad.ai.civilizations.subprocess.run", return_value=Completed()) as mocked_run:
+            decisions = adapter.decide_many(contexts)
+
+        command = mocked_run.call_args.args[0]
+        self.assertIn("opencode", command[0])
+        self.assertEqual(set(decisions.keys()), {"ada", "bo"})
+        self.assertEqual(decisions["bo"].action, "REST")
 
 
 if __name__ == "__main__":

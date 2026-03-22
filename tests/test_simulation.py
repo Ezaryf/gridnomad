@@ -9,6 +9,14 @@ from gridnomad.core.perception import build_perception
 from gridnomad.core.simulation import SimulationAbortError
 
 
+class BatchScriptedAdapter:
+    def __init__(self, decisions):
+        self.decisions = decisions
+
+    def decide_many(self, contexts):
+        return self.decisions
+
+
 class SimulationTests(unittest.TestCase):
     def test_salience_reports_full_ai_mode_and_context(self) -> None:
         ada = build_agent("ada", "red", 1, 1, survival=8)
@@ -167,6 +175,40 @@ class SimulationTests(unittest.TestCase):
         with self.assertRaises(SimulationAbortError):
             simulation.step()
         self.assertEqual((simulation.world.agents["ada"].x, simulation.world.agents["ada"].y), (1, 1))
+
+    def test_simulation_uses_group_batch_decisions_when_available(self) -> None:
+        ada = build_agent("ada", "red", 1, 1)
+        bo = build_agent("bo", "red", 2, 1)
+        adapter = BatchScriptedAdapter(
+            {
+                "ada": DecisionPayload(
+                    action="MOVE_EAST",
+                    target_x=2,
+                    target_y=1,
+                    reason="step east",
+                    intent="move one tile east",
+                    speech="",
+                    updated_emotions=ada.emotions,
+                    updated_needs=ada.needs,
+                    thought="I should step east.",
+                ),
+                "bo": DecisionPayload(
+                    action="REST",
+                    target_x=None,
+                    target_y=None,
+                    reason="rest",
+                    intent="pause and rest",
+                    speech="",
+                    updated_emotions=bo.emotions,
+                    updated_needs=bo.needs,
+                    thought="I should rest.",
+                ),
+            }
+        )
+        simulation = build_simulation(agents=[ada, bo], adapter=adapter)
+        events = simulation.step()
+        self.assertTrue(any(event.kind == "MOVE" and event.actor_id == "ada" for event in events))
+        self.assertTrue(any(event.kind == "REST" and event.actor_id == "bo" for event in events))
 
     def test_no_survival_death_before_tick_40(self) -> None:
         ada = build_agent("ada", "red", 1, 1, health=1, survival=10)
