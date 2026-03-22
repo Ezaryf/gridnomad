@@ -4,6 +4,7 @@ import json
 import os
 import re
 import subprocess
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -34,19 +35,19 @@ def _clean_cli_output(output: str) -> str:
 
 
 def build_cli_environment(cli_home: str | None = None, extra: dict[str, str] | None = None) -> dict[str, str]:
-    base = Path(cli_home or os.environ.get("GRIDNOMAD_CLI_HOME", Path.cwd() / ".cli-runtime")).resolve()
-    config_home = base / "config"
-    data_home = base / "data"
-    state_home = base / "state"
-    local_app_data = base / "localapp"
-    for path in (config_home, data_home, state_home, local_app_data):
-        path.mkdir(parents=True, exist_ok=True)
-
     env = os.environ.copy()
-    env["XDG_CONFIG_HOME"] = str(config_home)
-    env["XDG_DATA_HOME"] = str(data_home)
-    env["XDG_STATE_HOME"] = str(state_home)
-    env["LOCALAPPDATA"] = str(local_app_data)
+    if cli_home:
+        base = Path(cli_home).resolve()
+        config_home = base / "config"
+        data_home = base / "data"
+        state_home = base / "state"
+        local_app_data = base / "localapp"
+        for path in (config_home, data_home, state_home, local_app_data):
+            path.mkdir(parents=True, exist_ok=True)
+        env["XDG_CONFIG_HOME"] = str(config_home)
+        env["XDG_DATA_HOME"] = str(data_home)
+        env["XDG_STATE_HOME"] = str(state_home)
+        env["LOCALAPPDATA"] = str(local_app_data)
     if extra:
         for key, value in extra.items():
             if value:
@@ -319,12 +320,17 @@ class RoutingLLMAdapter:
         self.settings = settings
         self.project_dir = Path(project_dir or Path.cwd()).resolve()
         self.heuristic = HeuristicLLMAdapter()
-        self._cache: dict[tuple[str, str, str, str], Any] = {}
+        self._cache: dict[tuple[Any, ...], Any] = {}
         self._runtime_messages: list[dict[str, str]] = []
+        self._lock = threading.Lock()
 
     @classmethod
     def from_path(cls, path: str | Path, *, project_dir: Path | None = None) -> "RoutingLLMAdapter":
         return cls(CivilizationSettings.from_path(path), project_dir=project_dir)
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any], *, project_dir: Path | None = None) -> "RoutingLLMAdapter":
+        return cls(CivilizationSettings.from_dict(payload), project_dir=project_dir)
 
     def decide(self, agent_context: AgentContext):
         config = self.settings.for_faction(agent_context.agent.faction_id)
@@ -334,14 +340,15 @@ class RoutingLLMAdapter:
         try:
             return adapter.decide(agent_context)
         except Exception as exc:
-            self._runtime_messages.append(
-                {
-                    "faction_id": agent_context.agent.faction_id,
-                    "provider": config.provider,
-                    "model": config.model or "",
-                    "message": str(exc),
-                }
-            )
+            with self._lock:
+                self._runtime_messages.append(
+                    {
+                        "faction_id": agent_context.agent.faction_id,
+                        "provider": config.provider,
+                        "model": config.model or "",
+                        "message": str(exc),
+                    }
+                )
             fallback = self.heuristic.decide(agent_context)
             fallback.reason = f"Provider fallback after {config.provider} error: {exc}"
             fallback.thought = f"{fallback.thought} Provider fallback engaged."
@@ -351,25 +358,33 @@ class RoutingLLMAdapter:
         cache_key = (
             config.provider,
             config.model or "",
+            config.api_key or "",
+            config.google_api_key or "",
             config.cli_home or "",
             config.auth_mode,
+            config.google_cloud_project or "",
+            config.use_vertex,
+            config.opencode_provider or "",
+            config.timeout_seconds,
+            config.base_url or "",
         )
-        if cache_key in self._cache:
-            return self._cache[cache_key]
-        if config.provider == "gemini-cli":
-            adapter = GeminiCLIAdapter(config, project_dir=self.project_dir)
-        elif config.provider == "gemini-api":
-            adapter = GeminiAPIAdapter(config)
-        elif config.provider == "openai":
-            adapter = OpenAIAPIAdapter(config)
-        elif config.provider == "anthropic":
-            adapter = AnthropicAPIAdapter(config)
-        elif config.provider == "opencode":
-            adapter = OpenCodeCLIAdapter(config, project_dir=self.project_dir)
-        else:
-            adapter = self.heuristic
-        self._cache[cache_key] = adapter
-        return adapter
+        with self._lock:
+            if cache_key in self._cache:
+                return self._cache[cache_key]
+            if config.provider == "gemini-cli":
+                adapter = GeminiCLIAdapter(config, project_dir=self.project_dir)
+            elif config.provider == "gemini-api":
+                adapter = GeminiAPIAdapter(config)
+            elif config.provider == "openai":
+                adapter = OpenAIAPIAdapter(config)
+            elif config.provider == "anthropic":
+                adapter = AnthropicAPIAdapter(config)
+            elif config.provider == "opencode":
+                adapter = OpenCodeCLIAdapter(config, project_dir=self.project_dir)
+            else:
+                adapter = self.heuristic
+            self._cache[cache_key] = adapter
+            return adapter
 
     def describe_controllers(self, factions: dict[str, Any]) -> list[dict[str, str]]:
         summaries: list[dict[str, str]] = []
@@ -388,6 +403,7 @@ class RoutingLLMAdapter:
         return summaries
 
     def consume_runtime_messages(self) -> list[dict[str, str]]:
-        messages = list(self._runtime_messages)
-        self._runtime_messages.clear()
-        return messages
+        with self._lock:
+            messages = list(self._runtime_messages)
+            self._runtime_messages.clear()
+            return messages

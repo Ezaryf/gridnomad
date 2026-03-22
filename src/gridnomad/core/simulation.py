@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 import json
 import random
 from dataclasses import dataclass
 from pathlib import Path
 
-from gridnomad.ai.adapters import LLMAdapter, build_agent_context, parse_decision_payload
+from gridnomad.ai.adapters import AgentContext, LLMAdapter, build_agent_context, parse_decision_payload
 from gridnomad.core.actions import ActionRegistry, MODEL_ACTIONS, MOVE_DELTAS
 from gridnomad.core.culture import CultureStore
 from gridnomad.core.memory import MemoryStore
@@ -30,6 +31,13 @@ from gridnomad.core.perception import build_perception
 class SalienceDecision:
     should_reason: bool
     reasons: list[str]
+
+
+@dataclass(slots=True)
+class AgentDecisionFrame:
+    agent: AgentState
+    perception: object
+    decision: DecisionPayload
 
 
 class Simulation:
@@ -64,18 +72,17 @@ class Simulation:
 
     def step(self) -> list[SimulationEvent]:
         self.world.tick += 1
+        beat_start_ms = max(0, (self.world.tick - 1) * self.config.decision_interval_ms)
+        beat_end_ms = self.world.tick * self.config.decision_interval_ms
         tick_events: list[SimulationEvent] = []
         tick_events.extend(self._world_decay_update())
 
-        for agent in sorted(self.world.agents.values(), key=lambda item: item.id):
-            if not agent.alive:
-                continue
+        decision_frames = self._collect_decisions()
 
-            perception = build_perception(self.world, agent, self.config.perception_radius)
-            recent_events = self.memory_store.recent_events(agent.id, limit=5)
-            memories = self.memory_store.recent_thoughts(agent.id, limit=5)
-            recent_messages = self._recent_messages_for_agent(agent)
-            decision = self._reason_for_agent(agent, perception, recent_events, memories, recent_messages)
+        for frame in decision_frames:
+            agent = frame.agent
+            perception = frame.perception
+            decision = frame.decision
 
             agent.emotions = decision.updated_emotions
             agent.needs = decision.updated_needs
@@ -87,6 +94,9 @@ class Simulation:
 
             if self.registry.is_known(decision.action):
                 agent.last_intent = decision.to_intent()
+
+            action = self.registry.resolve(decision, self.world, agent)
+            self._prime_task(agent, action, decision, beat_start_ms=beat_start_ms, beat_end_ms=beat_end_ms)
 
             tick_events.append(
                 self._event(
@@ -110,8 +120,9 @@ class Simulation:
                     )
                 )
 
-            action = self.registry.resolve(decision, self.world, agent)
             tick_events.extend(self._apply_action(action, decision))
+            agent.render_x = float(agent.x)
+            agent.render_y = float(agent.y)
 
             if decision.thought.strip():
                 self.memory_store.add_thought(agent.id, decision.thought)
@@ -164,6 +175,47 @@ class Simulation:
         self.events.extend(tick_events)
         return tick_events
 
+    def _collect_decisions(self) -> list[AgentDecisionFrame]:
+        active_agents = [agent for agent in sorted(self.world.agents.values(), key=lambda item: item.id) if agent.alive]
+        if not active_agents:
+            return []
+
+        inputs = [self._build_decision_input(agent) for agent in active_agents]
+        max_workers = min(8, len(inputs))
+        if max_workers <= 1:
+            return [self._resolve_decision_input(item) for item in inputs]
+
+        with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="gridnomad-reason") as executor:
+            return list(executor.map(self._resolve_decision_input, inputs))
+
+    def _build_decision_input(self, agent: AgentState) -> tuple[AgentState, object, AgentContext]:
+        perception = build_perception(self.world, agent, self.config.perception_radius)
+        recent_events = self.memory_store.recent_events(agent.id, limit=5)
+        memories = self.memory_store.recent_thoughts(agent.id, limit=5)
+        recent_messages = self._recent_messages_for_agent(agent)
+        context = build_agent_context(
+            self.world.tick,
+            agent,
+            self.world,
+            perception,
+            recent_events,
+            memories,
+            recent_messages,
+            self.culture_store.summarize(agent.faction_id),
+        )
+        return agent, perception, context
+
+    def _resolve_decision_input(self, item: tuple[AgentState, object, AgentContext]) -> AgentDecisionFrame:
+        agent, perception, context = item
+        raw = self.adapter.decide(context)
+        try:
+            decision = parse_decision_payload(raw)
+        except (ValueError, KeyError, TypeError, json.JSONDecodeError):
+            decision = self._safe_fallback_decision(agent, reason="Invalid model response; using fallback.")
+        decision.updated_emotions = Emotions.from_dict(decision.updated_emotions.to_dict(), clamp=True)
+        decision.updated_needs = Needs.from_dict(decision.updated_needs.to_dict(), clamp=True)
+        return AgentDecisionFrame(agent=agent, perception=perception, decision=decision)
+
     def snapshot(self) -> dict[str, object]:
         return {
             "tick": self.world.tick,
@@ -171,6 +223,52 @@ class Simulation:
             "world": self.world.to_dict(),
             "culture": self.culture_store.to_dict(),
         }
+
+    def build_transition_frames(
+        self,
+        previous_agents: dict[str, dict[str, object]],
+        *,
+        frame_index_start: int = 0,
+    ) -> list[dict[str, object]]:
+        frame_count = max(1, round(self.config.decision_interval_ms / self.config.microstep_interval_ms))
+        beat_start_ms = max(0, (self.world.tick - 1) * self.config.decision_interval_ms)
+        frames: list[dict[str, object]] = []
+        for frame_number in range(1, frame_count + 1):
+            progress = frame_number / frame_count
+            time_ms = beat_start_ms + min(frame_number * self.config.microstep_interval_ms, self.config.decision_interval_ms)
+            humans: list[dict[str, object]] = []
+            for agent in sorted(self.world.agents.values(), key=lambda item: item.id):
+                start = previous_agents.get(agent.id, {})
+                start_x = float(start.get("x", agent.x))
+                start_y = float(start.get("y", agent.y))
+                render_x = start_x + ((agent.x - start_x) * progress)
+                render_y = start_y + ((agent.y - start_y) * progress)
+                humans.append(
+                    {
+                        "id": agent.id,
+                        "x": agent.x,
+                        "y": agent.y,
+                        "render_x": render_x,
+                        "render_y": render_y,
+                        "state": agent.task_state,
+                        "task_progress": min(100, max(0, round(progress * 100))),
+                        "target_human_id": agent.interaction_target_id,
+                        "target_tile": None
+                        if agent.task_target_x is None or agent.task_target_y is None
+                        else {"x": agent.task_target_x, "y": agent.task_target_y},
+                        "speaking": bool(agent.last_speech and time_ms <= agent.speaking_until_ms),
+                        "alive": agent.alive,
+                    }
+                )
+            frames.append(
+                {
+                    "time_ms": time_ms,
+                    "frame_index": frame_index_start + frame_number,
+                    "decision_beat": self.world.tick,
+                    "humans": humans,
+                }
+            )
+        return frames
 
     def evaluate_salience(
         self,
@@ -204,24 +302,8 @@ class Simulation:
         memories: list[str],
         recent_messages: dict[str, list[str]],
     ) -> DecisionPayload:
-        context = build_agent_context(
-            self.world.tick,
-            agent,
-            self.world,
-            perception,
-            recent_events,
-            memories,
-            recent_messages,
-            self.culture_store.summarize(agent.faction_id),
-        )
-        raw = self.adapter.decide(context)
-        try:
-            decision = parse_decision_payload(raw)
-        except (ValueError, KeyError, TypeError, json.JSONDecodeError):
-            decision = self._safe_fallback_decision(agent, reason="Invalid model response; using fallback.")
-        decision.updated_emotions = Emotions.from_dict(decision.updated_emotions.to_dict(), clamp=True)
-        decision.updated_needs = Needs.from_dict(decision.updated_needs.to_dict(), clamp=True)
-        return decision
+        _, _, context = self._build_decision_input(agent)
+        return self._resolve_decision_input((agent, perception, context)).decision
 
     def _recent_messages_for_agent(self, agent: AgentState, limit: int = 5) -> dict[str, list[str]]:
         civilization: list[str] = []
@@ -309,6 +391,7 @@ class Simulation:
                     updated_emotions=agent.emotions,
                     updated_needs=agent.needs,
                     thought=f"{dominant} at {intensity}: {reason}",
+                    interaction_mode="avoid",
                 )
         dominant, intensity = agent.emotions.dominant()
         return DecisionPayload(
@@ -321,27 +404,34 @@ class Simulation:
             updated_emotions=agent.emotions,
             updated_needs=agent.needs,
             thought=f"{dominant} at {intensity}: Holding position because no safe tile is open.",
+            interaction_mode="recover",
         )
 
     def _world_decay_update(self) -> list[SimulationEvent]:
         events: list[SimulationEvent] = []
+        current_time_ms = self.world.tick * self.config.decision_interval_ms
         for agent in sorted(self.world.agents.values(), key=lambda item: item.id):
             if not agent.alive:
                 continue
 
             agent.age_ticks += 1
+            agent.task_state = "idle"
+            agent.task_progress = 0
+            agent.task_target_x = None
+            agent.task_target_y = None
+            agent.interaction_target_id = None
 
-            if self.world.tick % 6 == 0:
+            if self.world.tick % 12 == 0:
                 agent.needs.survival = min(10, agent.needs.survival + 1)
-            if self.world.tick % 9 == 0:
+            if self.world.tick % 15 == 0:
                 agent.needs.belonging = min(10, agent.needs.belonging + 1)
-            if self.world.tick % 10 == 0:
+            if self.world.tick % 16 == 0:
                 agent.needs.self_actualization = min(10, agent.needs.self_actualization + 1)
 
             current_tile = self.world.get_tile(agent.x, agent.y)
             if current_tile.terrain == TileType.HOUSE:
                 agent.needs.safety = max(0, agent.needs.safety - 1)
-            elif self.world.tick % 8 == 0:
+            elif self.world.tick % 14 == 0:
                 agent.needs.safety = min(10, agent.needs.safety + 1)
 
             if agent.needs.survival >= 10:
@@ -349,7 +439,7 @@ class Simulation:
             else:
                 agent.critical_survival_ticks = max(0, agent.critical_survival_ticks - 1)
 
-            if self.world.tick < 40 or agent.critical_survival_ticks < 6:
+            if current_time_ms < 90000 or agent.critical_survival_ticks < 8:
                 continue
 
             agent.health = max(0, agent.health - 1)
@@ -386,8 +476,7 @@ class Simulation:
         if action.kind == "TRANSFER":
             return [self._apply_transfer(actor, action, decision)]
         if action.kind == "COMMUNICATE":
-            actor.last_action_success = True
-            return [self._event("COMMUNICATE", f"{actor.name} focused on communication.", True, actor.id, faction_id=actor.faction_id, metadata={"intent": decision.intent})]
+            return [self._apply_communicate(actor, action, decision)]
         actor.last_action_success = False
         return [self._event("NO_OP", f"{actor.name} did not execute a concrete world action.", False, actor.id, faction_id=actor.faction_id, metadata=action.metadata)]
 
@@ -460,19 +549,27 @@ class Simulation:
 
     def _apply_interact(self, actor: AgentState, action: EngineAction, decision: DecisionPayload) -> SimulationEvent:
         target = None if action.target_agent_id is None else self.world.agents.get(action.target_agent_id)
-        if target is None or not target.alive or abs(target.x - actor.x) + abs(target.y - actor.y) > 1:
+        if target is None or not target.alive:
             actor.last_action_success = False
             return self._event("INTERACT", f"{actor.name} could not find anyone close enough to interact with.", False, actor.id, faction_id=actor.faction_id)
+        if abs(target.x - actor.x) + abs(target.y - actor.y) > 1 and not self._approach_target(actor, target):
+            actor.last_action_success = False
+            return self._event("INTERACT", f"{actor.name} could not get close enough to {target.name}.", False, actor.id, faction_id=actor.faction_id)
         actor.needs.belonging = max(0, actor.needs.belonging - 2)
-        target.needs.belonging = max(0, target.needs.belonging - 1)
+        actor.needs.safety = max(0, actor.needs.safety - 1)
+        target.needs.belonging = max(0, target.needs.belonging - 2)
+        target.needs.safety = max(0, target.needs.safety - 1)
         actor.last_action_success = True
-        return self._event("INTERACT", f"{actor.name} spent time with {target.name}.", True, actor.id, target_agent_id=target.id, faction_id=actor.faction_id, metadata={"intent": decision.intent})
+        return self._event("INTERACT", f"{actor.name} spent time with {target.name}.", True, actor.id, target_agent_id=target.id, faction_id=actor.faction_id, metadata={"intent": decision.intent, "interaction_mode": decision.interaction_mode or "social"})
 
     def _apply_transfer(self, actor: AgentState, action: EngineAction, decision: DecisionPayload) -> SimulationEvent:
         target = None if action.target_agent_id is None else self.world.agents.get(action.target_agent_id)
-        if target is None or not target.alive or abs(target.x - actor.x) + abs(target.y - actor.y) > 1:
+        if target is None or not target.alive:
             actor.last_action_success = False
             return self._event("TRANSFER", f"{actor.name} had no nearby person to share with.", False, actor.id, faction_id=actor.faction_id)
+        if abs(target.x - actor.x) + abs(target.y - actor.y) > 1 and not self._approach_target(actor, target):
+            actor.last_action_success = False
+            return self._event("TRANSFER", f"{actor.name} could not reach {target.name} to share anything.", False, actor.id, faction_id=actor.faction_id)
         resource, amount = actor.inventory.most_abundant()
         if amount <= 0:
             actor.last_action_success = False
@@ -480,8 +577,20 @@ class Simulation:
         setattr(actor.inventory, resource, getattr(actor.inventory, resource) - 1)
         setattr(target.inventory, resource, getattr(target.inventory, resource) + 1)
         actor.needs.belonging = max(0, actor.needs.belonging - 1)
+        target.needs.survival = max(0, target.needs.survival - (1 if resource == "food" else 0))
         actor.last_action_success = True
         return self._event("TRANSFER", f"{actor.name} shared {resource} with {target.name}.", True, actor.id, target_agent_id=target.id, faction_id=actor.faction_id, metadata={"resource": resource, "intent": decision.intent})
+
+    def _apply_communicate(self, actor: AgentState, action: EngineAction, decision: DecisionPayload) -> SimulationEvent:
+        target = None if action.target_agent_id is None else self.world.agents.get(action.target_agent_id)
+        if target is not None and target.alive and abs(target.x - actor.x) + abs(target.y - actor.y) > 1:
+            self._approach_target(actor, target)
+        actor.needs.belonging = max(0, actor.needs.belonging - 1)
+        actor.last_action_success = True
+        if target is None or not target.alive:
+            return self._event("COMMUNICATE", f"{actor.name} broadcast a message to the group.", True, actor.id, faction_id=actor.faction_id, metadata={"intent": decision.intent, "speech": decision.speech})
+        target.needs.belonging = max(0, target.needs.belonging - 1)
+        return self._event("COMMUNICATE", f"{actor.name} communicated with {target.name}.", True, actor.id, target_agent_id=target.id, faction_id=actor.faction_id, metadata={"intent": decision.intent, "speech": decision.speech})
 
     def _target_or_current_tile(self, actor: AgentState, action: EngineAction) -> TileState:
         target_x = actor.x if action.target_x is None else action.target_x
@@ -508,6 +617,57 @@ class Simulation:
                     continue
                 if agent.faction_id == event.faction_id or agent.faction_id == target_faction_id:
                     self.memory_store.add_event(agent.id, event.description)
+
+    def _prime_task(
+        self,
+        agent: AgentState,
+        action: EngineAction,
+        decision: DecisionPayload,
+        *,
+        beat_start_ms: int,
+        beat_end_ms: int,
+    ) -> None:
+        task_state = {
+            "MOVE": "moving",
+            "REST": "resting",
+            "CONSUME": "consuming",
+            "GATHER": "gathering",
+            "BUILD": "building",
+            "INTERACT": "interacting",
+            "TRANSFER": "sharing",
+            "COMMUNICATE": "communicating",
+        }.get(action.kind, "idle")
+        if decision.interaction_mode == "hostile":
+            task_state = "engaging"
+        agent.task_state = task_state
+        agent.task_progress = 100
+        agent.task_target_x = action.target_x
+        agent.task_target_y = action.target_y
+        agent.interaction_target_id = action.target_agent_id or decision.target_agent_id
+        agent.last_decision_at_ms = beat_start_ms
+        agent.speaking_until_ms = beat_end_ms if decision.speech.strip() else 0
+
+    def _approach_target(self, actor: AgentState, target: AgentState) -> bool:
+        if abs(target.x - actor.x) + abs(target.y - actor.y) <= 1:
+            return True
+        candidates: list[tuple[int, int, int]] = []
+        for dx, dy in MOVE_DELTAS.values():
+            nx = target.x + dx
+            ny = target.y + dy
+            if not self.world.in_bounds(nx, ny):
+                continue
+            if not self.world.get_tile(nx, ny).passable:
+                continue
+            if self.world.position_occupied(nx, ny, exclude_agent_id=actor.id) and (nx, ny) != (actor.x, actor.y):
+                continue
+            distance = abs(nx - actor.x) + abs(ny - actor.y)
+            candidates.append((distance, nx, ny))
+        if not candidates:
+            return False
+        _, nx, ny = min(candidates, key=lambda item: (item[0], item[2], item[1]))
+        actor.x = nx
+        actor.y = ny
+        return abs(target.x - actor.x) + abs(target.y - actor.y) <= 1
 
     def _event(
         self,

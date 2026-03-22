@@ -286,7 +286,7 @@ def generate_seeded_world(
                 tile.biome = "mountain"
                 if _hash01(settings.seed + 923, x, y) > 0.42:
                     tile.resource = "stone"
-                if _hash01(settings.seed + 517, x, y) > 0.8:
+                if _hash01(settings.seed + 517, x, y) > 0.93:
                     props.append(_prop("mountain", x, y, variant=_variant(settings.seed + 5, x, y, 4)))
             else:
                 tile.biome = best_biome
@@ -294,7 +294,7 @@ def generate_seeded_world(
                     tile.feature = "forest"
                     if _hash01(settings.seed + 771, x, y) > 0.5:
                         tile.resource = "wood"
-                    if _hash01(settings.seed + 557, x, y) > 0.82:
+                    if _hash01(settings.seed + 557, x, y) > 0.94:
                         props.append(
                             _prop(
                                 "tree-cluster",
@@ -304,11 +304,11 @@ def generate_seeded_world(
                                 density=1 + _variant(settings.seed + 23, x, y, 3),
                             )
                         )
-                elif best_biome in {"grassland", "meadow", "fertile-plains", "arcane"} and _hash01(settings.seed + 991, x, y) > 0.975:
+                elif best_biome in {"grassland", "meadow", "fertile-plains", "arcane"} and _hash01(settings.seed + 991, x, y) > 0.992:
                     props.append(_prop("grove", x, y, variant=_variant(settings.seed + 59, x, y, 4)))
-                elif best_biome in {"coast", "swamp"} and _hash01(settings.seed + 877, x, y) > 0.93:
+                elif best_biome in {"coast", "swamp"} and _hash01(settings.seed + 877, x, y) > 0.975:
                     props.append(_prop("reed-bank", x, y, variant=_variant(settings.seed + 47, x, y, 3)))
-                elif best_biome in {"desert", "savanna", "hills", "volcanic"} and _hash01(settings.seed + 809, x, y) > 0.94:
+                elif best_biome in {"desert", "savanna", "hills", "volcanic"} and _hash01(settings.seed + 809, x, y) > 0.982:
                     props.append(_prop("stone-outcrop", x, y, variant=_variant(settings.seed + 43, x, y, 3)))
                 if best_biome in {"hills", "volcanic"} and _hash01(settings.seed + 1203, x, y) > 0.8:
                     tile.resource = tile.resource or "stone"
@@ -889,27 +889,27 @@ def _manual_capital_candidate(
 def _choose_tile_decal(tile: TileState, seed: int, x: int, y: int) -> str | None:
     value = _hash01(seed + 1601, x, y)
     if tile.terrain == TileType.WATER:
-        if tile.feature == "river" and value > 0.8:
+        if tile.feature == "river" and value > 0.94:
             return "water-glint"
-        if tile.edge_mask and value > 0.72:
+        if tile.edge_mask and value > 0.9:
             return "sea-foam"
         return None
     if tile.settlement_id:
         return None
-    if tile.feature == "forest" and value > 0.55:
+    if tile.feature == "forest" and value > 0.9:
         return "fern-cluster"
-    if tile.feature == "mountain" and value > 0.44:
+    if tile.feature == "mountain" and value > 0.88:
         return "snow-cap"
-    if tile.biome in {"coast", "lagoon", "shoreline"} and value > 0.68:
+    if tile.biome in {"coast", "lagoon", "shoreline"} and value > 0.93:
         return "shell-bank"
     if tile.biome in {"grassland", "meadow", "fertile-plains", "island-grass", "orchard", "high-pasture", "vale"}:
-        if value > 0.9:
+        if value > 0.988:
             return "wildflowers"
-        if value > 0.78:
+        if value > 0.95:
             return "grass-tuft"
-    if tile.biome in {"savanna", "desert", "hills", "dune", "moor"} and value > 0.82:
+    if tile.biome in {"savanna", "desert", "hills", "dune", "moor"} and value > 0.96:
         return "pebbles"
-    if tile.biome in {"jungle", "swamp", "arcane"} and value > 0.74:
+    if tile.biome in {"jungle", "swamp", "arcane"} and value > 0.92:
         return "fern-cluster"
     return None
 
@@ -1014,7 +1014,7 @@ def _place_landmarks(
     settings: GeneratorSettings,
     rng: random.Random,
 ) -> None:
-    landmark_target = max(5, min(18, (settings.width * settings.height * settings.landmark_density) // 24576))
+    landmark_target = max(3, min(10, (settings.width * settings.height * settings.landmark_density) // 32768))
     candidates: list[tuple[float, int, int, str]] = []
     for settlement in settlements:
         x = int(settlement["x"])

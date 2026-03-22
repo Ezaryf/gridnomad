@@ -49,7 +49,7 @@ def build_perception(world: WorldState, agent: AgentState, radius: int) -> Perce
         relation = direction_from_delta(other.x - agent.x, other.y - agent.y)
         is_friendly = other.faction_id == agent.faction_id
         descriptor = "friendly" if is_friendly else "foreign"
-        points.append(f"{descriptor} agent {other.name} of {other.faction_id} faction {relation}")
+        points.append(f"{descriptor} human {other.name} [id={other.id}] of {other.faction_id} group {relation}")
         signature_parts.append(f"agent:{other.id}:{other.faction_id}:{other.x},{other.y}")
         if is_friendly:
             friendly_agents.append(other.id)

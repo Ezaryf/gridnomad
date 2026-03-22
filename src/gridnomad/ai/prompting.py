@@ -84,18 +84,24 @@ Your group's culture summary: {cultural_context}
 1. Decide what a real human like you wants to do next.
 2. Return a short, human-readable intent that explains your goal.
 3. Choose one primitive action that can execute that intent in the world.
-4. Optionally include one short spoken line if you would naturally say something.
-5. Update your emotions and needs honestly based on what just happened.
-6. Generate one short thought that sounds like your inner voice.
+4. If another human matters to your plan, include their id in target_agent_id.
+5. If your plan is social, you may include interaction_mode such as conversation, support, sharing, hostile, or observe.
+6. Optionally include one short spoken line if you would naturally say something.
+7. Update your emotions and needs honestly based on what just happened.
+8. Generate one short thought that sounds like your inner voice.
 
 Output only valid JSON with this structure:
 {{
   "action": "MOVE",
   "target_x": null,
   "target_y": null,
+  "target_agent_id": null,
   "reason": "I want to reach the riverbank before dark.",
   "intent": "Find water and see if anyone nearby needs help carrying supplies.",
   "speech": "I am heading for the river. Come with me if you need water.",
+  "target_resource_kind": "food",
+  "interaction_mode": "support",
+  "desired_distance": 1,
   "updated_emotions": {{
     "Joy": 5,
     "Sadness": 1,
@@ -119,6 +125,7 @@ Important:
 - The visible part of the simulation should feel conscious and human, not scripted.
 - Use action primitives only to execute your intent; the intent should be richer than the primitive.
 - Keep speech short and natural.
+- Use target_agent_id whenever you are choosing to talk to, help, follow, avoid, or confront a specific nearby human.
 - Do not invent kingdoms, races, cities, or fantasy systems. This is a group-of-humans simulator.
 
 Now respond with your JSON decision.

@@ -441,16 +441,20 @@ class IntentState:
     action: str
     target_x: int | None = None
     target_y: int | None = None
+    target_agent_id: str | None = None
     reason: str = ""
     intent: str = ""
+    interaction_mode: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "action": self.action,
             "target_x": self.target_x,
             "target_y": self.target_y,
+            "target_agent_id": self.target_agent_id,
             "reason": self.reason,
             "intent": self.intent,
+            "interaction_mode": self.interaction_mode,
         }
 
 
@@ -483,6 +487,15 @@ class AgentState:
     age_ticks: int = 0
     tick_born: int = 0
     critical_survival_ticks: int = 0
+    render_x: float | None = None
+    render_y: float | None = None
+    task_state: str = "idle"
+    task_progress: int = 0
+    task_target_x: int | None = None
+    task_target_y: int | None = None
+    interaction_target_id: str | None = None
+    speaking_until_ms: int = 0
+    last_decision_at_ms: int = 0
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "AgentState":
@@ -513,6 +526,15 @@ class AgentState:
             age_ticks=require_int("age_ticks", data.get("age_ticks", 0), 0),
             tick_born=require_int("tick_born", data.get("tick_born", 0), 0),
             critical_survival_ticks=require_int("critical_survival_ticks", data.get("critical_survival_ticks", 0), 0),
+            render_x=None if data.get("render_x") is None else float(data.get("render_x")),
+            render_y=None if data.get("render_y") is None else float(data.get("render_y")),
+            task_state=str(data.get("task_state", "idle")),
+            task_progress=require_int("task_progress", data.get("task_progress", 0), 0, 100, clamp=True),
+            task_target_x=None if data.get("task_target_x") is None else require_int("task_target_x", data.get("task_target_x")),
+            task_target_y=None if data.get("task_target_y") is None else require_int("task_target_y", data.get("task_target_y")),
+            interaction_target_id=data.get("interaction_target_id"),
+            speaking_until_ms=require_int("speaking_until_ms", data.get("speaking_until_ms", 0), 0),
+            last_decision_at_ms=require_int("last_decision_at_ms", data.get("last_decision_at_ms", 0), 0),
         )
 
     @property
@@ -548,6 +570,15 @@ class AgentState:
             "age_ticks": self.age_ticks,
             "tick_born": self.tick_born,
             "critical_survival_ticks": self.critical_survival_ticks,
+            "render_x": self.x if self.render_x is None else self.render_x,
+            "render_y": self.y if self.render_y is None else self.render_y,
+            "task_state": self.task_state,
+            "task_progress": self.task_progress,
+            "task_target_x": self.task_target_x,
+            "task_target_y": self.task_target_y,
+            "interaction_target_id": self.interaction_target_id,
+            "speaking_until_ms": self.speaking_until_ms,
+            "last_decision_at_ms": self.last_decision_at_ms,
         }
 
 
@@ -780,6 +811,10 @@ class SimulationConfig:
     biome_density: int = 62
     fauna_density: int = 54
     kingdom_growth_intensity: int = 60
+    run_duration_seconds: int = 80
+    decision_interval_ms: int = 2000
+    microstep_interval_ms: int = 125
+    playback_speed: int = 1
 
     def __post_init__(self) -> None:
         self.width = require_int("width", self.width, 1)
@@ -805,6 +840,16 @@ class SimulationConfig:
         self.kingdom_growth_intensity = require_int(
             "kingdom_growth_intensity", self.kingdom_growth_intensity, 0, 100, clamp=True
         )
+        self.run_duration_seconds = require_int(
+            "run_duration_seconds", self.run_duration_seconds, 5, 3600, clamp=True
+        )
+        self.decision_interval_ms = require_int(
+            "decision_interval_ms", self.decision_interval_ms, 250, 30000, clamp=True
+        )
+        self.microstep_interval_ms = require_int(
+            "microstep_interval_ms", self.microstep_interval_ms, 16, 5000, clamp=True
+        )
+        self.playback_speed = require_int("playback_speed", self.playback_speed, 1, 8, clamp=True)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "SimulationConfig":
@@ -827,6 +872,10 @@ class SimulationConfig:
             biome_density=data.get("biome_density", 62),
             fauna_density=data.get("fauna_density", 54),
             kingdom_growth_intensity=data.get("kingdom_growth_intensity", 60),
+            run_duration_seconds=data.get("run_duration_seconds", 80),
+            decision_interval_ms=data.get("decision_interval_ms", 2000),
+            microstep_interval_ms=data.get("microstep_interval_ms", 125),
+            playback_speed=data.get("playback_speed", 1),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -849,6 +898,10 @@ class SimulationConfig:
             "biome_density": self.biome_density,
             "fauna_density": self.fauna_density,
             "kingdom_growth_intensity": self.kingdom_growth_intensity,
+            "run_duration_seconds": self.run_duration_seconds,
+            "decision_interval_ms": self.decision_interval_ms,
+            "microstep_interval_ms": self.microstep_interval_ms,
+            "playback_speed": self.playback_speed,
         }
 
 
@@ -1031,6 +1084,10 @@ class DecisionPayload:
     updated_emotions: Emotions
     updated_needs: Needs
     thought: str
+    target_agent_id: str | None = None
+    target_resource_kind: str | None = None
+    interaction_mode: str | None = None
+    desired_distance: int | None = None
     cultural_innovation: CulturalInnovation | None = None
     action_proposal: ActionProposal | None = None
     outbound_message: OutboundMessage | None = None
@@ -1044,12 +1101,16 @@ class DecisionPayload:
             action=str(data["action"]),
             target_x=None if data.get("target_x") is None else require_int("target_x", data["target_x"]),
             target_y=None if data.get("target_y") is None else require_int("target_y", data["target_y"]),
+            target_agent_id=None if data.get("target_agent_id") is None else str(data.get("target_agent_id")),
             reason=str(data["reason"]),
             intent=str(data.get("intent", data.get("reason", ""))),
             speech=str(data.get("speech", "")),
             updated_emotions=Emotions.from_dict(data["updated_emotions"], clamp=clamp_states),
             updated_needs=Needs.from_dict(data["updated_needs"], clamp=clamp_states),
             thought=str(data["thought"]),
+            target_resource_kind=None if data.get("target_resource_kind") is None else str(data.get("target_resource_kind")),
+            interaction_mode=None if data.get("interaction_mode") is None else str(data.get("interaction_mode")),
+            desired_distance=None if data.get("desired_distance") is None else require_int("desired_distance", data.get("desired_distance"), 0, 8, clamp=True),
             cultural_innovation=None if innovation is None else CulturalInnovation.from_dict(innovation),
             action_proposal=None if proposal is None else ActionProposal.from_dict(proposal),
             outbound_message=None if outbound_message is None else OutboundMessage.from_dict(outbound_message),
@@ -1067,8 +1128,10 @@ class DecisionPayload:
             action=self.action,
             target_x=self.target_x,
             target_y=self.target_y,
+            target_agent_id=self.target_agent_id,
             reason=self.reason,
             intent=self.intent,
+            interaction_mode=self.interaction_mode or "",
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -1076,6 +1139,7 @@ class DecisionPayload:
             "action": self.action,
             "target_x": self.target_x,
             "target_y": self.target_y,
+            "target_agent_id": self.target_agent_id,
             "reason": self.reason,
             "intent": self.intent,
             "speech": self.speech,
@@ -1083,6 +1147,12 @@ class DecisionPayload:
             "updated_needs": self.updated_needs.to_dict(),
             "thought": self.thought,
         }
+        if self.target_resource_kind is not None:
+            data["target_resource_kind"] = self.target_resource_kind
+        if self.interaction_mode is not None:
+            data["interaction_mode"] = self.interaction_mode
+        if self.desired_distance is not None:
+            data["desired_distance"] = self.desired_distance
         if self.cultural_innovation is not None:
             data["cultural_innovation"] = self.cultural_innovation.to_dict()
         if self.action_proposal is not None:

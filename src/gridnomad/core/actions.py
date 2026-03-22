@@ -60,7 +60,7 @@ class ActionRegistry:
             target_x, target_y = self._resolve_target_tile(decision, world_state, actor)
             return EngineAction(kind="MOVE", actor_id=actor.id, target_x=target_x, target_y=target_y)
 
-        if action in {"INTERACT", "TRANSFER"}:
+        if action in {"INTERACT", "TRANSFER", "COMMUNICATE"}:
             target_agent = self._resolve_target_agent(decision, world_state, actor)
             return EngineAction(
                 kind=action,
@@ -70,7 +70,7 @@ class ActionRegistry:
                 target_agent_id=None if target_agent is None else target_agent.id,
             )
 
-        if action in {"REST", "CONSUME", "GATHER", "BUILD", "COMMUNICATE"}:
+        if action in {"REST", "CONSUME", "GATHER", "BUILD"}:
             target_x, target_y = self._resolve_target_tile(decision, world_state, actor)
             return EngineAction(kind=action, actor_id=actor.id, target_x=target_x, target_y=target_y)
 
@@ -99,6 +99,10 @@ class ActionRegistry:
         world_state: WorldState,
         actor: AgentState,
     ):
+        if decision.target_agent_id is not None:
+            target = world_state.agents.get(decision.target_agent_id)
+            if target is not None and target.alive and target.id != actor.id:
+                return target
         if decision.target_x is not None and decision.target_y is not None:
             target = world_state.agent_at(decision.target_x, decision.target_y, exclude_agent_id=actor.id)
             if target is not None:
@@ -106,7 +110,6 @@ class ActionRegistry:
         nearby = world_state.nearby_agents(
             actor.x, actor.y, self.perception_radius, exclude_agent_id=actor.id
         )
-        nearby = [candidate for candidate in nearby if abs(candidate.x - actor.x) + abs(candidate.y - actor.y) <= 1]
         return nearby[0] if nearby else None
 
     def intent_from_decision(self, decision: DecisionPayload) -> IntentState:

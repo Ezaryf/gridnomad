@@ -46,18 +46,23 @@ class HeuristicLLMAdapter:
         action = "MOVE"
         target_x: int | None = None
         target_y: int | None = None
+        target_agent_id: str | None = None
         reason = "I want to keep exploring and stay useful to the people near me."
         intent = "Keep moving through the area, look for resources, and stay close enough to help others."
         speech = ""
         outbound_message: OutboundMessage | None = None
+        interaction_mode: str | None = None
+        target_resource_kind: str | None = None
 
         if perception.hostile_agents:
             hostile = agent_context.world.agents[perception.hostile_agents[0]]
             action = "INTERACT"
             target_x, target_y = hostile.x, hostile.y
+            target_agent_id = hostile.id
             reason = f"{hostile.name} feels dangerous, so I need to confront the situation carefully."
             intent = f"Deal with the threat from {hostile.name} before it gets worse."
             speech = f"{hostile.name}, back away. I do not want this to get worse."
+            interaction_mode = "hostile"
             outbound_message = OutboundMessage(
                 scope="diplomacy",
                 target_faction_id=hostile.faction_id,
@@ -70,6 +75,7 @@ class HeuristicLLMAdapter:
             reason = "My survival need is urgent and this land looks useful for food or supplies."
             intent = "Find food or usable materials before my survival need gets worse."
             speech = "I need food and supplies soon."
+            target_resource_kind = "food"
             outbound_message = OutboundMessage(
                 scope="civilization",
                 text="I am searching this area for food and supplies."
@@ -87,13 +93,29 @@ class HeuristicLLMAdapter:
             friend = agent_context.world.agents[perception.friendly_agents[0]]
             action = "INTERACT"
             target_x, target_y = friend.x, friend.y
+            target_agent_id = friend.id
             reason = f"I feel isolated and want to reconnect with {friend.name}."
             intent = f"Move closer to {friend.name} and restore some sense of connection."
             speech = f"{friend.name}, can we stay together for a while?"
+            interaction_mode = "support"
             outbound_message = OutboundMessage(
                 scope="civilization",
                 target_agent_id=friend.id,
                 text=f"I need support from {friend.name} nearby."
+            )
+        elif perception.friendly_agents and agent_context.tick % 3 == 0:
+            friend = agent_context.world.agents[perception.friendly_agents[0]]
+            action = "COMMUNICATE"
+            target_x, target_y = friend.x, friend.y
+            target_agent_id = friend.id
+            reason = f"I want to check in with {friend.name} and keep the group coordinated."
+            intent = f"Talk with {friend.name} and stay coordinated."
+            speech = f"{friend.name}, what do you need right now?"
+            interaction_mode = "conversation"
+            outbound_message = OutboundMessage(
+                scope="civilization",
+                target_agent_id=friend.id,
+                text=f"I am checking in with {friend.name} so we stay coordinated."
             )
         elif agent.inventory.food > 0 and agent.needs.survival >= 5:
             action = "CONSUME"
@@ -152,6 +174,9 @@ class HeuristicLLMAdapter:
             updated_emotions=updated_emotions,
             updated_needs=updated_needs,
             thought=thought,
+            target_agent_id=target_agent_id,
+            target_resource_kind=target_resource_kind,
+            interaction_mode=interaction_mode,
             cultural_innovation=cultural_innovation,
             outbound_message=outbound_message,
         )
