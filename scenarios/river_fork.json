@@ -1,0 +1,117 @@
+{
+  "seed": 13,
+  "config": {
+    "width": 6,
+    "height": 6,
+    "perception_radius": 2,
+    "snapshot_interval": 10,
+    "thought_memory_limit": 20,
+    "event_memory_limit": 20,
+    "reason_interval": 5
+  },
+  "tiles": [
+    {"x": 2, "y": 1, "terrain": "water"},
+    {"x": 2, "y": 2, "terrain": "water"},
+    {"x": 2, "y": 3, "terrain": "water"},
+    {"x": 1, "y": 1, "farmable": true},
+    {"x": 4, "y": 3, "farmable": true},
+    {"x": 0, "y": 5, "resource": "stone"},
+    {"x": 5, "y": 0, "resource": "wood"}
+  ],
+  "factions": [
+    {
+      "id": "red",
+      "name": "Red",
+      "culture": [
+        {
+          "category": "norm",
+          "element": "River Pact",
+          "description": "Help build bridges whenever water blocks the clan.",
+          "strength": 75
+        }
+      ]
+    },
+    {
+      "id": "blue",
+      "name": "Blue",
+      "culture": [
+        {
+          "category": "ritual",
+          "element": "Sunrise Thanks",
+          "description": "Share food after successful harvests.",
+          "strength": 68
+        }
+      ]
+    }
+  ],
+  "agents": [
+    {
+      "id": "ada",
+      "name": "Ada",
+      "faction_id": "red",
+      "x": 1,
+      "y": 2,
+      "personality": {
+        "openness": 8,
+        "conscientiousness": 7,
+        "extraversion": 5,
+        "agreeableness": 8,
+        "neuroticism": 3
+      },
+      "emotions": {
+        "Joy": 4,
+        "Sadness": 2,
+        "Fear": 1,
+        "Anger": 1,
+        "Disgust": 0,
+        "Surprise": 3
+      },
+      "needs": {
+        "Survival": 5,
+        "Safety": 4,
+        "Belonging": 5,
+        "Esteem": 4,
+        "Self_Actualization": 4
+      },
+      "inventory": {
+        "food": 3,
+        "wood": 3,
+        "stone": 1
+      }
+    },
+    {
+      "id": "bo",
+      "name": "Bo",
+      "faction_id": "blue",
+      "x": 4,
+      "y": 2,
+      "personality": {
+        "openness": 5,
+        "conscientiousness": 6,
+        "extraversion": 7,
+        "agreeableness": 6,
+        "neuroticism": 4
+      },
+      "emotions": {
+        "Joy": 5,
+        "Sadness": 1,
+        "Fear": 2,
+        "Anger": 1,
+        "Disgust": 0,
+        "Surprise": 2
+      },
+      "needs": {
+        "Survival": 4,
+        "Safety": 3,
+        "Belonging": 6,
+        "Esteem": 4,
+        "Self_Actualization": 5
+      },
+      "inventory": {
+        "food": 2,
+        "wood": 1,
+        "stone": 2
+      }
+    }
+  ]
+}

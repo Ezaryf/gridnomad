@@ -1,0 +1,30 @@
+{
+  "factions": {
+    "red": {
+      "provider": "heuristic",
+      "model": "",
+      "apiKey": "",
+      "googleApiKey": "",
+      "authMode": "existing-cli-auth",
+      "googleCloudProject": "",
+      "useVertex": false,
+      "opencodeProvider": "",
+      "cliHome": "",
+      "timeoutSeconds": 120,
+      "baseUrl": ""
+    },
+    "blue": {
+      "provider": "heuristic",
+      "model": "",
+      "apiKey": "",
+      "googleApiKey": "",
+      "authMode": "existing-cli-auth",
+      "googleCloudProject": "",
+      "useVertex": false,
+      "opencodeProvider": "",
+      "cliHome": "",
+      "timeoutSeconds": 120,
+      "baseUrl": ""
+    }
+  }
+}
