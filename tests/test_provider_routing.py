@@ -12,6 +12,7 @@ from gridnomad.ai.civilizations import (
     GeminiAPIAdapter,
     OpenAIAPIAdapter,
     OpenCodeCLIAdapter,
+    ProviderDecisionError,
     RoutingLLMAdapter,
 )
 from gridnomad.core.perception import build_perception
@@ -65,7 +66,7 @@ class ProviderRoutingTests(unittest.TestCase):
         )
         self.assertIsNot(first, second)
 
-    def test_routing_adapter_records_provider_fallback_messages(self) -> None:
+    def test_routing_adapter_raises_and_records_provider_messages(self) -> None:
         agent = build_agent("ada", "red", 1, 1)
         _, world, _ = build_world(agents=[agent])
         perception = build_perception(world, agent, 2)
@@ -86,10 +87,9 @@ class ProviderRoutingTests(unittest.TestCase):
         )
         adapter._adapter_for = lambda config: ExplodingAdapter()  # type: ignore[method-assign]
 
-        decision = adapter.decide(context)
+        with self.assertRaises(ProviderDecisionError):
+            adapter.decide(context)
         messages = adapter.consume_runtime_messages()
-
-        self.assertIn("Provider fallback after openai error", decision.reason)
         self.assertEqual(messages[0]["provider"], "openai")
         self.assertEqual(messages[0]["faction_id"], "red")
         self.assertIn("provider exploded", messages[0]["message"])

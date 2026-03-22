@@ -28,7 +28,7 @@ class PromptAndValidationTests(unittest.TestCase):
         self.assertIn("shared food", prompt)
         self.assertIn("Built a bridge yesterday", prompt)
         self.assertIn("I found a ford", prompt)
-        self.assertIn("MOVE", prompt)
+        self.assertIn("MOVE_NORTH", prompt)
         self.assertIn("INTERACT", prompt)
 
     def test_parse_decision_payload_clamps_state_values_and_captures_unknown_action(self) -> None:

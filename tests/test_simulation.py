@@ -6,6 +6,7 @@ from helpers import build_agent, build_simulation, farmable_tile, water_tile
 from gridnomad.ai.adapters import ScriptedLLMAdapter
 from gridnomad.core.models import CulturalInnovation, DecisionPayload, Emotions, Needs, OutboundMessage, TileType
 from gridnomad.core.perception import build_perception
+from gridnomad.core.simulation import SimulationAbortError
 
 
 class SimulationTests(unittest.TestCase):
@@ -132,7 +133,7 @@ class SimulationTests(unittest.TestCase):
         self.assertTrue(gather_events[0].success)
         self.assertGreaterEqual(ada.inventory.food, 1)
 
-    def test_interact_can_approach_non_adjacent_target_and_frames_interpolate(self) -> None:
+    def test_interact_does_not_auto_approach_in_strict_mode(self) -> None:
         ada = build_agent("ada", "red", 1, 1, belonging=8)
         bo = build_agent("bo", "red", 4, 1)
         simulation = build_simulation(agents=[ada, bo])
@@ -151,23 +152,11 @@ class SimulationTests(unittest.TestCase):
             interaction_mode="conversation",
         )
 
-        previous_agents = {"ada": {"x": ada.x, "y": ada.y}, "bo": {"x": bo.x, "y": bo.y}}
         event = simulation._apply_action(simulation.registry.resolve(interact, simulation.world, ada), interact)[0]
-        simulation._prime_task(
-            simulation.world.agents["ada"],
-            simulation.registry.resolve(interact, simulation.world, simulation.world.agents["ada"]),
-            interact,
-            beat_start_ms=0,
-            beat_end_ms=simulation.config.decision_interval_ms,
-        )
-        frames = simulation.build_transition_frames(previous_agents)
+        self.assertFalse(event.success)
+        self.assertEqual((simulation.world.agents["ada"].x, simulation.world.agents["ada"].y), (1, 1))
 
-        self.assertTrue(event.success)
-        self.assertLessEqual(abs(simulation.world.agents["ada"].x - simulation.world.agents["bo"].x) + abs(simulation.world.agents["ada"].y - simulation.world.agents["bo"].y), 1)
-        self.assertTrue(frames)
-        self.assertLess(frames[0]["humans"][0]["render_x"], frames[-1]["humans"][0]["render_x"])
-
-    def test_invalid_model_response_uses_safe_fallback(self) -> None:
+    def test_invalid_model_response_aborts_strict_run(self) -> None:
         ada = build_agent("ada", "red", 1, 1, survival=8)
         adapter = ScriptedLLMAdapter({"ada": ["{not valid json"]})
         simulation = build_simulation(
@@ -175,9 +164,9 @@ class SimulationTests(unittest.TestCase):
             tile_overrides=[(1, 0, water_tile()), (2, 1, farmable_tile())],
             adapter=adapter,
         )
-        events = simulation.step()
-        self.assertTrue(any(event.kind in {"MOVE", "REST"} for event in events))
-        self.assertTrue(simulation.world.agents["ada"].alive)
+        with self.assertRaises(SimulationAbortError):
+            simulation.step()
+        self.assertEqual((simulation.world.agents["ada"].x, simulation.world.agents["ada"].y), (1, 1))
 
     def test_no_survival_death_before_tick_40(self) -> None:
         ada = build_agent("ada", "red", 1, 1, health=1, survival=10)

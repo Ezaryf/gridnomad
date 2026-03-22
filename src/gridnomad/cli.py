@@ -7,7 +7,7 @@ import sys
 
 from gridnomad.ai import HeuristicLLMAdapter, RoutingLLMAdapter
 from gridnomad.core.scenario import dump_snapshot, load_scenario, load_scenario_data
-from gridnomad.core.simulation import Simulation
+from gridnomad.core.simulation import Simulation, SimulationAbortError
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -58,10 +58,16 @@ def run_command(args: argparse.Namespace) -> int:
     output_dir = Path(args.out)
     output_dir.mkdir(parents=True, exist_ok=True)
     dump_snapshot(output_dir / "snapshot-0000.json", simulation.snapshot())
-    for _ in range(args.ticks):
-        simulation.step()
-        if simulation.world.tick % bundle.config.snapshot_interval == 0:
-            dump_snapshot(output_dir / f"snapshot-{simulation.world.tick:04d}.json", simulation.snapshot())
+    try:
+        for _ in range(args.ticks):
+            simulation.step()
+            if simulation.world.tick % bundle.config.snapshot_interval == 0:
+                dump_snapshot(output_dir / f"snapshot-{simulation.world.tick:04d}.json", simulation.snapshot())
+    except SimulationAbortError as exc:
+        dump_snapshot(output_dir / f"snapshot-{simulation.world.tick:04d}.json", simulation.snapshot())
+        simulation.write_events(output_dir)
+        print(str(exc), file=sys.stderr)
+        return 1
     if simulation.world.tick % bundle.config.snapshot_interval != 0:
         dump_snapshot(output_dir / f"snapshot-{simulation.world.tick:04d}.json", simulation.snapshot())
     simulation.write_events(output_dir)
@@ -128,14 +134,41 @@ def run_stream_command(args: argparse.Namespace) -> int:
             for agent in simulation.world.agents.values()
             if agent.alive
         }
-        events = simulation.step()
+        try:
+            events = simulation.step()
+        except SimulationAbortError as exc:
+            if isinstance(adapter, RoutingLLMAdapter):
+                for message in adapter.consume_runtime_messages():
+                    emit("provider_status", tick=simulation.world.tick, time_ms=simulation.current_time_ms, **message)
+            snapshot = simulation.snapshot()
+            dump_snapshot(output_dir / f"snapshot-{simulation.world.tick:04d}.json", snapshot)
+            simulation.write_events(output_dir)
+            emit(
+                "run_failed",
+                tick=simulation.world.tick,
+                time_ms=simulation.current_time_ms,
+                message=str(exc),
+                reason=exc.reason,
+                actor_id=exc.actor_id,
+                faction_id=exc.faction_id,
+                provider=exc.provider,
+                model=exc.model,
+                snapshot=snapshot,
+            )
+            emit(
+                "error",
+                tick=simulation.world.tick,
+                time_ms=simulation.current_time_ms,
+                message=str(exc),
+            )
+            return 1
         if simulation.world.tick % bundle.config.snapshot_interval == 0:
             dump_snapshot(output_dir / f"snapshot-{simulation.world.tick:04d}.json", simulation.snapshot())
         for event in events:
             emit(
                 "event",
                 tick=event.tick,
-                time_ms=simulation.world.tick * bundle.config.decision_interval_ms,
+                time_ms=simulation.current_time_ms,
                 event=event.to_dict(),
             )
         for frame in simulation.build_transition_frames(previous_agents, frame_index_start=frame_index):
@@ -145,14 +178,14 @@ def run_stream_command(args: argparse.Namespace) -> int:
         emit("snapshot", tick=simulation.world.tick, snapshot=snapshot)
         if isinstance(adapter, RoutingLLMAdapter):
             for message in adapter.consume_runtime_messages():
-                emit("provider_status", tick=simulation.world.tick, **message)
+                emit("provider_status", tick=simulation.world.tick, time_ms=simulation.current_time_ms, **message)
         emit(
             "status",
             tick=simulation.world.tick,
-            time_ms=simulation.world.tick * bundle.config.decision_interval_ms,
+            time_ms=simulation.current_time_ms,
             humans_alive=sum(1 for agent in simulation.world.agents.values() if agent.alive),
             groups=len(simulation.world.factions),
-            message=f"Decision beat {simulation.world.tick} complete.",
+            message=f"Live step {simulation.world.tick} complete.",
         )
 
     if simulation.world.tick % bundle.config.snapshot_interval != 0:
@@ -161,7 +194,7 @@ def run_stream_command(args: argparse.Namespace) -> int:
     emit(
         "complete",
         tick=simulation.world.tick,
-        time_ms=simulation.world.tick * bundle.config.decision_interval_ms,
+        time_ms=simulation.current_time_ms,
         run_dir=str(output_dir.resolve()),
         event_count=len(simulation.events),
         snapshot=simulation.snapshot(),

@@ -160,6 +160,54 @@ class CLITests(unittest.TestCase):
         finally:
             shutil.rmtree(scratch_root, ignore_errors=True)
 
+    def test_run_stream_fails_fast_when_provider_is_not_ready(self) -> None:
+        scenario_path = ROOT / "scenarios" / "river_fork.json"
+        scenario = json.loads(scenario_path.read_text(encoding="utf-8"))
+        scratch_root = ROOT / ".tmp-test-artifacts"
+        run_dir = scratch_root / f"strict-fail-{uuid.uuid4().hex}"
+        scratch_root.mkdir(exist_ok=True)
+        run_dir.mkdir(parents=True, exist_ok=False)
+        try:
+          command = [
+              sys.executable,
+              "-m",
+              "gridnomad",
+              "run-stream",
+              "--request-stdin",
+              "--ticks",
+              "2",
+              "--out",
+              str(run_dir),
+          ]
+          payload = {
+              "scenario": scenario,
+              "settings": {
+                  "factions": {
+                      "red": {"provider": "openai", "model": "gpt-5", "apiKey": ""},
+                      "blue": {"provider": "heuristic", "model": ""}
+                  }
+              }
+          }
+          result = subprocess.run(
+              command,
+              cwd=ROOT,
+              input=json.dumps(payload),
+              capture_output=True,
+              text=True,
+              check=False,
+          )
+          self.assertNotEqual(result.returncode, 0)
+          messages = [
+              json.loads(line)
+              for line in result.stdout.splitlines()
+              if line.strip()
+          ]
+          types = [message["type"] for message in messages]
+          self.assertIn("run_failed", types)
+          self.assertFalse(any(message.get("type") == "event" and message.get("event", {}).get("kind") == "MOVE" for message in messages))
+        finally:
+            shutil.rmtree(scratch_root, ignore_errors=True)
+
 
 if __name__ == "__main__":
     unittest.main()
