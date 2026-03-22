@@ -21,22 +21,22 @@ export default function InspectorTabs({
       <div className="border-b border-white/20 px-3 py-2">
         <div className="flex items-center justify-between gap-2">
           <span className="text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-400">Inspector</span>
-          <Badge className="h-5 text-[10px]">{events.length} events</Badge>
+          <Badge className="h-6 px-3">{events.length} events</Badge>
         </div>
       </div>
       <Tabs defaultValue="inspect" className="flex min-h-0 flex-1 flex-col">
         <div className="border-b border-white/20 px-3 py-1.5">
-          <TabsList className="grid w-full grid-cols-3">
-            <TabsTrigger value="inspect" className="text-xs">
-              <Eye className="mr-1.5 size-3" />
+          <TabsList className="grid w-full grid-cols-3 h-8">
+            <TabsTrigger value="inspect" className="text-xs h-full">
+              <Eye className="mr-1.5 size-3.5" />
               Inspect
             </TabsTrigger>
-            <TabsTrigger value="events" className="text-xs">
-              <Clock3 className="mr-1.5 size-3" />
+            <TabsTrigger value="events" className="text-xs h-full">
+              <Clock3 className="mr-1.5 size-3.5" />
               Events
             </TabsTrigger>
-            <TabsTrigger value="comms" className="text-xs">
-              <MessagesSquare className="mr-1.5 size-3" />
+            <TabsTrigger value="comms" className="text-xs h-full">
+              <MessagesSquare className="mr-1.5 size-3.5" />
               Comms
             </TabsTrigger>
           </TabsList>
@@ -114,7 +114,7 @@ export default function InspectorTabs({
                 {events.slice(-30).reverse().map((event, i) => (
                   <article key={`${event.tick}-${i}`} className="rounded-xl border border-white/20 bg-white/10 p-3 backdrop-blur-[10px] backdrop-saturate-180">
                     <div className="mb-1.5 flex items-center justify-between gap-2 text-[9px] uppercase tracking-[0.18em] text-zinc-500">
-                      <span>Step {event.tick}</span>
+                      <span>Live step {event.tick}</span>
                       <span>{event.kind}</span>
                     </div>
                     <p className="text-xs leading-5 text-zinc-300">{event.description}</p>
@@ -167,7 +167,7 @@ function HumanPanel({ human, group, controller, recentMemories = [] }) {
           <h3 className="text-lg font-semibold tracking-tight text-zinc-50">{human.name}</h3>
           <p className="text-[11px] text-zinc-400">{group} · {human.alive === false ? "deceased" : "alive"}</p>
         </div>
-        <Badge variant="outline" className="h-5 text-[10px]">{human.id}</Badge>
+        <Badge variant="outline" className="h-6 px-3">{human.id}</Badge>
       </div>
 
       <div className="grid grid-cols-2 gap-1.5">
@@ -181,6 +181,9 @@ function HumanPanel({ human, group, controller, recentMemories = [] }) {
         <Chip label="Food" value={String(human.inventory?.food ?? 0)} />
         <Chip label="Wood" value={String(human.inventory?.wood ?? 0)} />
         <Chip label="Stone" value={String(human.inventory?.stone ?? 0)} />
+        <Chip label="Weapon" value={human.weapon_kind || "none"} />
+        <Chip label="Bond" value={human.bonded_partner_id || "none"} />
+        <Chip label="Home" value={human.home_structure_id || "none"} />
         <Chip label="Safety" value={String(needs.Safety ?? needs.safety ?? 0)} />
       </div>
 
@@ -188,6 +191,7 @@ function HumanPanel({ human, group, controller, recentMemories = [] }) {
       <Section title="Thought">{human.last_thought || "None."}</Section>
       <Section title="Speech">{human.last_speech || "None."}</Section>
       <Section title="Interaction target">{human.interaction_target_id || "None."}</Section>
+      <Section title="Last world action">{human.last_world_action_summary || "None."}</Section>
       <Section title="Persona">{human.persona_summary || "None."}</Section>
       <Section title="Social style">{human.social_style || "None."}</Section>
       <Section title="Resource bias">{human.resource_bias || "None."}</Section>
@@ -211,9 +215,9 @@ function HumanPanel({ human, group, controller, recentMemories = [] }) {
 
 function Chip({ label, value }) {
   return (
-    <div className="rounded-lg border border-white/6 bg-white/2 px-2.5 py-1.5">
-      <p className="text-[8px] uppercase tracking-[0.2em] text-zinc-500">{label}</p>
-      <p className="text-[11px] font-medium text-zinc-200">{value}</p>
+    <div className="rounded-xl border border-white/10 bg-white/5 p-2.5 backdrop-blur-[10px] backdrop-saturate-180">
+      <p className="mb-0.5 ml-0.5 text-[9px] uppercase tracking-[0.15em] text-zinc-400">{label}</p>
+      <p className="ml-0.5 text-xs font-semibold text-zinc-100">{value}</p>
     </div>
   );
 }
@@ -242,7 +246,7 @@ function CommsSection({ title, messages, scenario }) {
         messages.slice(-12).reverse().map((msg, i) => (
           <article key={`${msg.tick}-${msg.sender_agent_id}-${i}`} className="rounded-xl border border-white/20 bg-white/10 p-3 backdrop-blur-[10px] backdrop-saturate-180">
             <div className="mb-1.5 flex items-center justify-between gap-2 text-[9px] uppercase tracking-[0.18em] text-zinc-500">
-              <span>Step {msg.tick}</span>
+              <span>Live step {msg.tick}</span>
               <span>{msg.scope}</span>
             </div>
             <p className="text-xs leading-5 text-zinc-300">

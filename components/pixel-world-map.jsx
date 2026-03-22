@@ -51,7 +51,7 @@ export default function PixelWorldMap({
     if (!world) {
       return "empty";
     }
-    return `${world.seed}:${world.width}x${world.height}:${world.props?.length ?? 0}:${world.settlements?.length ?? 0}:${countTerrain(world, "house")}:${countTerrain(world, "farm")}`;
+    return `${world.seed}:${world.width}x${world.height}:${world.props?.length ?? 0}:${world.settlements?.length ?? 0}:${countTerrain(world, "house")}:${countTerrain(world, "bridge")}:${countTerrain(world, "farm")}:${countDecal(world, "pebbles")}:${Object.keys(world.structures ?? {}).length}`;
   }, [world]);
   const staticRenderSignature = useMemo(
     () => `${staticWorldSignature}:${overlays?.roads ? 1 : 0}:${overlays?.resources ? 1 : 0}:${overlays?.structures === false ? 0 : 1}:${overlays?.territories ? 1 : 0}`,
@@ -439,6 +439,16 @@ function renderStaticWorld(runtime, world, overlays, worldSignature) {
       base.y = py - shift;
       base.tint = baseStyle.tint;
       terrainLayer.addChild(base);
+
+      if (tile.terrain === "house") {
+        const roof = new Sprite(runtime.proceduralTextures["house-roof"] ?? Texture.WHITE);
+        roof.width = TILE_SIZE;
+        roof.height = TILE_SIZE;
+        roof.x = px;
+        roof.y = py - shift;
+        roof.tint = tile.owner_faction ? factionTint(tile.owner_faction) : 0xef4444;
+        detailLayer.addChild(roof);
+      }
 
       if (tile.edge_mask && tile.terrain !== "water") {
         for (const overlay of coastOverlays(tile.edge_mask)) {
@@ -849,6 +859,19 @@ function generateProceduralTextures(runtime) {
     }
   });
 
+  makeTexture("bridge", (g) => {
+    if (g.beginFill) {
+      g.beginFill(0x5b4330); g.drawRect(0, 5, 16, 6);
+      g.beginFill(0x8a6a4d); g.drawRect(0, 4, 16, 1);
+      g.beginFill(0xc9a26f); g.drawRect(2, 6, 12, 4);
+      g.endFill();
+    } else {
+      g.rect(0, 5, 16, 6).fill({ color: 0x5b4330 });
+      g.rect(0, 4, 16, 1).fill({ color: 0x8a6a4d });
+      g.rect(2, 6, 12, 4).fill({ color: 0xc9a26f });
+    }
+  });
+
   // Basic compact humans
   makeTexture("agent", (g) => {
     if (g.beginFill) {
@@ -1139,6 +1162,18 @@ function countTerrain(world, terrain) {
   for (const row of world?.tiles ?? []) {
     for (const tile of row) {
       if (tile?.terrain === terrain) {
+        count += 1;
+      }
+    }
+  }
+  return count;
+}
+
+function countDecal(world, decal) {
+  let count = 0;
+  for (const row of world?.tiles ?? []) {
+    for (const tile of row) {
+      if (tile?.decal === decal) {
         count += 1;
       }
     }

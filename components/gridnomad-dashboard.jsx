@@ -31,8 +31,10 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   addGroup,
+  humanNameValidation,
   normalizeSettings,
   providerDisplayName,
+  regenerateDuplicateHumanNames,
   removeGroup,
   simulationReadiness,
   synthesizeScenario,
@@ -71,6 +73,7 @@ export default function GridNomadDashboard() {
   const [settings, setSettings] = useState({ world: {}, groups: [] });
   const [world, setWorld] = useState(null);
   const [events, setEvents] = useState([]);
+  const [activityItems, setActivityItems] = useState([]);
   const [statusItems, setStatusItems] = useState([]);
   const [debugLines, setDebugLines] = useState([]);
   const [statusMessage, setStatusMessage] = useState("Set up groups, assign controllers, and stream.");
@@ -106,6 +109,7 @@ export default function GridNomadDashboard() {
   );
   const metrics = useMemo(() => buildMetrics(world, settings), [world, settings]);
   const readiness = useMemo(() => simulationReadiness(settings, providerCatalogs), [settings, providerCatalogs]);
+  const nameValidation = useMemo(() => humanNameValidation(settings), [settings]);
 
   useEffect(() => {
     void bootstrap();
@@ -160,11 +164,12 @@ export default function GridNomadDashboard() {
     }
   }
 
-  async function refreshProviderCatalog(scope, entityId, provider, { credential = "", cliHome = "", silent = false } = {}) {
+  async function refreshProviderCatalog(scope, entityId, provider, { credential = "", cliHome = "", googleCloudProject = "", silent = false } = {}) {
     try {
       const params = new URLSearchParams({ provider });
       if (credential) params.set("credential", credential);
       if (cliHome) params.set("cliHome", cliHome);
+      if (googleCloudProject) params.set("googleCloudProject", googleCloudProject);
       const response = await fetch(`/api/providers/catalog?${params.toString()}`, { cache: "no-store" });
       const payload = await response.json();
       setProviderCatalogs((c) => ({ ...c, [catalogKey(scope, entityId)]: payload }));
@@ -191,6 +196,8 @@ export default function GridNomadDashboard() {
                 ? "custom home"
                 : "user-global home";
           pushStatus("provider", `OpenCode ${payload.health_state ?? "status"} · ${payload.models?.length ?? 0} models · ${homeLabel}.`);
+        } else if (provider === "gemini-cli") {
+          pushStatus("provider", `Gemini CLI ${payload.health_state ?? "status"} · ${payload.models?.length ?? 0} models.`);
         } else {
           pushStatus("provider", payload.ok ? `${payload.models?.length ?? 0} models for ${providerDisplayName(provider)}.` : `Could not load models.`);
         }
@@ -212,16 +219,28 @@ export default function GridNomadDashboard() {
       await refreshProviderCatalog("group", group.id, provider, {
         credential: group.controller?.opencodeProvider ?? "",
         cliHome: group.controller?.cliHome ?? "",
+        googleCloudProject: group.controller?.googleCloudProject ?? "",
         silent
       });
     }
   }
 
   async function saveSettings(nextSettings = settings, silent = false) {
+    const validation = humanNameValidation(nextSettings);
+    if (!validation.valid) {
+      pushStatus("error", validation.message);
+      setStatusMessage(validation.message);
+      setSheetTab("groups");
+      setSheetOpen(true);
+      return null;
+    }
     setWorking(true);
     try {
       const response = await fetch("/api/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(nextSettings) });
       const payload = await response.json();
+      if (!response.ok || payload.ok === false) {
+        throw new Error(payload.message ?? "Settings could not be saved.");
+      }
       const normalized = normalizeSettings(payload.templateScenario, payload.settings);
       setTemplateScenario(payload.templateScenario);
       setSettings(normalized);
@@ -269,7 +288,7 @@ export default function GridNomadDashboard() {
       return;
     }
     setRunning(true);
-    setEvents([]); setStatusItems([]); setDebugLines([]); setCurrentTick(0); setLiveTimeMs(0); setLiveFrame(null); frameQueueRef.current = [];
+    setEvents([]); setActivityItems([]); setStatusItems([]); setDebugLines([]); setCurrentTick(0); setLiveTimeMs(0); setLiveFrame(null); frameQueueRef.current = [];
     setStatusMessage("Starting live stream...");
     const controller = new AbortController();
     abortRef.current = controller;
@@ -312,8 +331,17 @@ export default function GridNomadDashboard() {
     let payload;
     try { payload = JSON.parse(trimmed); } catch { pushDebug("stream", `Non-JSON: ${trimmed}`); return; }
     if (payload.type === "frame") { frameQueueRef.current.push(payload); return; }
+    if (payload.type === "decision_summary" && payload.summary) { setActivityItems((c) => [...c, payload.summary]); return; }
     if (payload.type === "snapshot" && payload.snapshot?.world) { setWorld(payload.snapshot.world); setCurrentTick(payload.tick ?? payload.snapshot.world.tick ?? 0); return; }
-    if (payload.type === "event" && payload.event) { setEvents((c) => [...c, { ...payload.event, time_ms: payload.time_ms ?? null }]); return; }
+    if (payload.type === "event" && payload.event) {
+      const enrichedEvent = { ...payload.event, time_ms: payload.time_ms ?? null };
+      setEvents((c) => [...c, enrichedEvent]);
+      const activityItem = summarizeActivityEvent(enrichedEvent, settings);
+      if (activityItem) {
+        setActivityItems((c) => [...c, activityItem]);
+      }
+      return;
+    }
     if (payload.type === "status") { setCurrentTick(payload.tick ?? 0); setLiveTimeMs(payload.time_ms ?? 0); pushStatus("status", payload.message ?? "Live step complete.", payload.tick, payload.time_ms ?? null); setStatusMessage(payload.message ?? "Live step complete."); return; }
     if (payload.type === "run_started") {
       pushStatus("run_started", `Live run: ${payload.run_duration_seconds ?? settings.world?.run_duration_seconds ?? 0}s at ${payload.playback_speed ?? settings.world?.playback_speed ?? 1}x.`, 0, 0);
@@ -394,6 +422,7 @@ export default function GridNomadDashboard() {
       await refreshProviderCatalog("group", groupId, provider, {
         credential: group?.controller?.opencodeProvider ?? "",
         cliHome: group?.controller?.cliHome ?? "",
+        googleCloudProject: group?.controller?.googleCloudProject ?? "",
       });
     }
   }
@@ -476,6 +505,12 @@ export default function GridNomadDashboard() {
   function toggleOverlay(key) { setOverlays((c) => ({ ...c, [key]: !c[key] })); }
   function handleSelectHuman(human) { setSelectedHumanId(human.id); setSelectedTile({ x: human.x, y: human.y }); }
   function handleSelectTile(tile) { setSelectedTile(tile); if (!tile) setSelectedHumanId(null); }
+  function regenerateDuplicateNames() {
+    if (!templateScenario) return;
+    setSettings((current) => regenerateDuplicateHumanNames(current, templateScenario));
+    pushStatus("settings", "Regenerated duplicate human names.");
+    setStatusMessage("Duplicate human names were regenerated.");
+  }
 
   const busy = loading || working || running;
   const groups = settings.groups ?? [];
@@ -487,49 +522,54 @@ export default function GridNomadDashboard() {
     <div className="flex h-dvh w-dvw flex-col overflow-hidden bg-black text-zinc-100">
 
       {/* ── TOOLBAR ── */}
-      <header className="flex h-12 items-center justify-between border-b border-white/20 bg-black/40 px-4 backdrop-blur-[10px] backdrop-saturate-180">
-        <Button variant="ghost" size="icon" className="size-8" onClick={() => setLeftOpen((o) => !o)} title="Toggle groups panel">
-          <PanelLeft className="size-4" />
-        </Button>
+      <header className="flex h-14 items-center gap-4 border-b border-white/20 bg-black/40 px-4 shadow-[0_8px_32px_rgba(0,0,0,0.1)] backdrop-blur-[10px] backdrop-saturate-180">
+        <div className="flex items-center gap-2">
+          <Button variant="ghost" size="icon" className="size-8 rounded-lg" onClick={() => setLeftOpen((o) => !o)} title="Toggle groups panel">
+            <PanelLeft className="size-4" />
+          </Button>
+          <div className="mx-1 h-6 w-px bg-white/20" />
+        </div>
 
-        <div className="h-5 w-px bg-white/10" />
+        <div className="flex items-end gap-2">
+          <ToolbarField label="Seed" className="w-[104px]">
+            <Input type="number" className="h-8 rounded-lg px-2.5 py-1.5 text-xs shadow-none" value={settings.world?.seed ?? ""} onChange={(e) => patchWorld({ seed: Number(e.target.value) })} />
+          </ToolbarField>
+          <div className="flex items-center gap-1">
+            <Button variant="ghost" size="icon" className="size-8 rounded-lg" onClick={randomizeSeed} title="Randomize seed"><Dice5 className="size-4 text-zinc-400 hover:text-white" /></Button>
+            <Button variant="ghost" size="icon" className="size-8 rounded-lg" onClick={copySeed} title="Copy seed"><Copy className="size-4 text-zinc-400 hover:text-white" /></Button>
+          </div>
+        </div>
 
-        <ToolbarField label="Seed" className="w-24">
-          <Input type="number" className="h-7 text-xs" value={settings.world?.seed ?? ""} onChange={(e) => patchWorld({ seed: Number(e.target.value) })} />
-        </ToolbarField>
-        <Button variant="ghost" size="icon" className="size-7" onClick={randomizeSeed} title="Randomize seed"><Dice5 className="size-3.5" /></Button>
-        <Button variant="ghost" size="icon" className="size-7" onClick={copySeed} title="Copy seed"><Copy className="size-3.5" /></Button>
-
-        <ToolbarField label="Preset" className="w-36">
+        <ToolbarField label="Preset" className="w-40">
           <Select value={settings.world?.generatorPreset ?? "grand-continent"} onValueChange={(v) => patchWorld({ generatorPreset: v })}>
-            <SelectTrigger className="h-7 text-xs"><SelectValue /></SelectTrigger>
-            <SelectContent>{PRESET_OPTIONS.map((o) => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent>
+            <SelectTrigger className="h-8 rounded-lg px-3 py-1.5 text-xs shadow-none"><SelectValue /></SelectTrigger>
+            <SelectContent>{PRESET_OPTIONS.map((o) => <SelectItem key={o.value} value={o.value} className="text-xs">{o.label}</SelectItem>)}</SelectContent>
           </Select>
         </ToolbarField>
 
         <ToolbarField label="Size" className="w-24">
           <Select value={String(settings.world?.width ?? 128)} onValueChange={(v) => patchWorld({ width: Number(v), height: Number(v) })}>
-            <SelectTrigger className="h-7 text-xs"><SelectValue /></SelectTrigger>
-            <SelectContent>{SIZE_OPTIONS.map((s) => <SelectItem key={s} value={String(s)}>{s}×{s}</SelectItem>)}</SelectContent>
+            <SelectTrigger className="h-8 rounded-lg px-3 py-1.5 text-xs shadow-none"><SelectValue /></SelectTrigger>
+            <SelectContent>{SIZE_OPTIONS.map((s) => <SelectItem key={s} value={String(s)} className="text-xs">{s}×{s}</SelectItem>)}</SelectContent>
           </Select>
         </ToolbarField>
 
         <ToolbarField label="Duration" className="w-24">
-          <Input type="number" min="10" max="1800" className="h-7 text-xs" value={settings.world?.run_duration_seconds ?? 80} onChange={(e) => patchWorld({ run_duration_seconds: clampDuration(Number(e.target.value)) })} />
+          <Input type="number" min="10" max="1800" className="h-8 rounded-lg px-2.5 py-1.5 text-xs shadow-none" value={settings.world?.run_duration_seconds ?? 80} onChange={(e) => patchWorld({ run_duration_seconds: clampDuration(Number(e.target.value)) })} />
         </ToolbarField>
 
         <ToolbarField label="Speed" className="w-20">
           <Select value={String(settings.world?.playback_speed ?? 1)} onValueChange={(v) => patchWorld({ playback_speed: Number(v) })}>
-            <SelectTrigger className="h-7 text-xs"><SelectValue /></SelectTrigger>
-            <SelectContent>{[1, 2, 4].map((speed) => <SelectItem key={speed} value={String(speed)}>{speed}×</SelectItem>)}</SelectContent>
+            <SelectTrigger className="h-8 rounded-lg px-3 py-1.5 text-xs shadow-none"><SelectValue /></SelectTrigger>
+            <SelectContent>{[1, 2, 4].map((speed) => <SelectItem key={speed} value={String(speed)} className="text-xs">{speed}×</SelectItem>)}</SelectContent>
           </Select>
         </ToolbarField>
 
-        <div className="h-5 w-px bg-white/10" />
+        <div className="mx-2 h-6 w-px bg-white/20" />
 
         <div className="flex items-center gap-1">
           {Object.entries(overlays).map(([key, on]) => (
-            <Button key={key} variant={on ? "default" : "ghost"} size="sm" className="h-7 px-2 text-[11px]" onClick={() => toggleOverlay(key)}>
+            <Button key={key} variant={on ? "default" : "ghost"} size="sm" className="h-8 px-2.5 text-[11px] uppercase tracking-wide rounded-lg" onClick={() => toggleOverlay(key)}>
               {key}
             </Button>
           ))}
@@ -537,24 +577,26 @@ export default function GridNomadDashboard() {
 
         <div className="flex-1" />
 
-        <Button size="sm" className="h-7" onClick={() => generateWorld()} disabled={busy}>Generate</Button>
-        <Button size="sm" variant="secondary" className="h-7" onClick={runSimulationLive} disabled={busy} title={readiness.ready ? "Run strict AI simulation" : readiness.message}>
-          <Play className="size-3.5" />
-          Run
-        </Button>
-        <Button size="sm" variant="outline" className="h-7" onClick={() => setPlaybackPaused((value) => !value)} disabled={!running && frameQueueRef.current.length === 0}>
-          <Pause className="size-3.5" />
-          {playbackPaused ? "Resume" : "Pause"}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button size="sm" className="h-8 text-xs font-semibold shadow-none rounded-lg" onClick={() => generateWorld()} disabled={busy}>Generate</Button>
+          <Button size="sm" variant="secondary" className="h-8 text-xs font-semibold shadow-none rounded-lg" onClick={runSimulationLive} disabled={busy} title={readiness.ready ? "Run strict AI simulation" : readiness.message}>
+            <Play className="size-3.5" />
+            Run
+          </Button>
+          <Button size="sm" variant="outline" className="h-8 text-xs font-semibold shadow-none rounded-lg" onClick={() => setPlaybackPaused((value) => !value)} disabled={!running && frameQueueRef.current.length === 0}>
+            <Pause className="size-3.5" />
+            {playbackPaused ? "Resume" : "Pause"}
+          </Button>
 
-        <div className="h-5 w-px bg-white/10" />
+          <div className="mx-2 h-6 w-px bg-white/20" />
 
-        <Button variant="ghost" size="icon" className="size-8" onClick={() => { setSheetTab("world"); setSheetOpen(true); }} title="Advanced settings">
-          <Settings2 className="size-4" />
-        </Button>
-        <Button variant="ghost" size="icon" className="size-8" onClick={() => setRightOpen((o) => !o)} title="Toggle inspector panel">
-          <PanelRight className="size-4" />
-        </Button>
+          <Button variant="ghost" size="icon" className="size-8 rounded-lg" onClick={() => { setSheetTab("world"); setSheetOpen(true); }} title="Advanced settings">
+            <Settings2 className="size-4" />
+          </Button>
+          <Button variant="ghost" size="icon" className="size-8 rounded-lg" onClick={() => setRightOpen((o) => !o)} title="Toggle inspector panel">
+            <PanelRight className="size-4" />
+          </Button>
+        </div>
       </header>
 
       {!readiness.ready ? (
@@ -609,38 +651,38 @@ export default function GridNomadDashboard() {
             <ScrollArea className="min-h-0 flex-1">
               <div className="space-y-2 p-2">
                 {groups.map((group) => (
-                  <article key={group.id} className="rounded-2xl border border-white/20 bg-white/10 p-3 backdrop-blur-[10px] backdrop-saturate-180">
-                    <div className="mb-2 flex items-center gap-2">
-                      <div className="size-7 shrink-0 rounded-lg border border-white/10" style={{ backgroundColor: group.color }} />
-                      <Input className="h-7 flex-1 text-xs font-medium" value={group.name} onChange={(e) => patchGroup(group.id, { name: e.target.value })} />
-                      <Button variant="ghost" size="icon" className="size-7 shrink-0 text-zinc-500 hover:text-red-400" onClick={() => deleteHumanGroup(group.id)} disabled={busy}>
-                        <Trash2 className="size-3" />
+                  <article key={group.id} className="flex flex-col gap-3 rounded-2xl border border-white/20 bg-white/10 p-4 backdrop-blur-[10px] backdrop-saturate-180 shadow-[0_8px_32px_rgba(0,0,0,0.1)]">
+                    <div className="flex items-center gap-2.5">
+                      <div className="size-8 shrink-0 rounded-lg border border-white/10 shadow-inner" style={{ backgroundColor: group.color }} />
+                      <Input className="h-8 flex-1 px-3 py-1.5 text-xs font-semibold shadow-none" value={group.name} onChange={(e) => patchGroup(group.id, { name: e.target.value })} />
+                      <Button variant="ghost" size="icon" className="size-8 shrink-0 rounded-lg text-zinc-500 hover:bg-red-500/10 hover:text-red-400" onClick={() => deleteHumanGroup(group.id)} disabled={busy} title="Delete Group">
+                        <Trash2 className="size-4" />
                       </Button>
                     </div>
-                    <div className="grid grid-cols-2 gap-1.5">
-                      <label className="grid gap-0.5">
-                        <span className="text-[9px] uppercase tracking-[0.2em] text-zinc-500">Pop</span>
-                        <Input type="number" min="1" max="24" className="h-6 text-[11px]" value={group.population_count} onChange={(e) => patchGroup(group.id, { population_count: Number(e.target.value) })} />
+                    <div className="grid grid-cols-2 gap-3">
+                      <label className="grid gap-1.5">
+                        <span className="ml-1 text-[9px] uppercase leading-none tracking-[0.15em] text-zinc-400/90">Pop</span>
+                        <Input type="number" min="1" max="24" className="h-8 px-3 py-1.5 text-xs shadow-none" value={group.population_count} onChange={(e) => patchGroup(group.id, { population_count: Number(e.target.value) })} />
                       </label>
-                      <label className="grid gap-0.5">
-                        <span className="text-[9px] uppercase tracking-[0.2em] text-zinc-500">Controller</span>
+                      <label className="grid gap-1.5">
+                        <span className="ml-1 text-[9px] uppercase leading-none tracking-[0.15em] text-zinc-400/90">Controller</span>
                         <Select value={group.controller?.provider ?? "heuristic"} onValueChange={(v) => handleProviderChange(group.id, v)}>
-                          <SelectTrigger className="h-6 text-[11px]"><SelectValue /></SelectTrigger>
-                          <SelectContent>{PROVIDER_LIST.map((o) => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent>
+                          <SelectTrigger className="h-8 px-3 py-1.5 text-xs shadow-none"><SelectValue /></SelectTrigger>
+                          <SelectContent>{PROVIDER_LIST.map((o) => <SelectItem key={o.value} value={o.value} className="text-xs">{o.label}</SelectItem>)}</SelectContent>
                         </Select>
                       </label>
                     </div>
                     {readiness.groups?.find((entry) => entry.id === group.id)?.state !== "ready" ? (
-                      <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 px-2.5 py-2 text-[11px] leading-4 text-amber-100">
-                        <p className="font-medium">
+                      <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-2.5 text-[11px] leading-relaxed text-amber-100">
+                        <p className="font-semibold text-amber-300">
                           {readiness.groups.find((entry) => entry.id === group.id)?.state}
                         </p>
-                        <p className="text-amber-200/80">
+                        <p className="mt-0.5 text-amber-200/80">
                           {readiness.groups.find((entry) => entry.id === group.id)?.message}
                         </p>
                       </div>
                     ) : (
-                      <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-2 text-[11px] leading-4 text-emerald-100">
+                      <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-3 py-2.5 text-[11px] font-medium leading-relaxed text-emerald-100">
                         Ready to run with {providerDisplayName(group.controller?.provider ?? "heuristic")}.
                       </div>
                     )}
@@ -696,7 +738,7 @@ export default function GridNomadDashboard() {
           </main>
           <div className="h-[220px] shrink-0 border-t border-white/20 bg-[rgba(4,4,4,0.96)]">
             <SimulationConsole
-              events={events}
+              activityItems={activityItems}
               statusItems={statusItems}
               debugLines={debugLines}
               running={running}
@@ -737,7 +779,7 @@ export default function GridNomadDashboard() {
             <Badge variant="outline" className="h-5 text-[10px] capitalize">{world.weather}</Badge>
           </>
         )}
-        <Badge variant="outline" className="h-5 text-[10px]">Step {currentTick}</Badge>
+        <Badge variant="outline" className="h-5 text-[10px]">Live step {currentTick}</Badge>
         <Badge variant="outline" className="h-5 text-[10px]">{formatLiveTime(liveTimeMs)}</Badge>
         <Badge variant="outline" className="h-5 text-[10px]">{metrics.humans} humans</Badge>
         <Badge variant="outline" className={readiness.ready ? "h-5 text-[10px]" : "h-5 border-red-500/40 bg-red-500/10 text-[10px] text-red-200"}>{readiness.ready ? "ready" : "blocked"}</Badge>
@@ -767,6 +809,8 @@ export default function GridNomadDashboard() {
         onLaunchProviderLogin={launchProviderLogin}
         onCreateOpencodeHome={createManagedOpencodeHome}
         onCopyCommand={copyCommand}
+        nameValidation={nameValidation}
+        onRegenerateDuplicateNames={regenerateDuplicateNames}
       />
     </div>
   );
@@ -777,8 +821,8 @@ export default function GridNomadDashboard() {
 
 function ToolbarField({ label, className = "", children }) {
   return (
-    <label className={`grid gap-0 ${className}`}>
-      <span className="text-[8px] uppercase leading-none tracking-[0.2em] text-zinc-500">{label}</span>
+    <label className={`grid gap-1.5 ${className}`}>
+      <span className="text-[9px] uppercase leading-none tracking-[0.15em] text-zinc-400/90 ml-0.5">{label}</span>
       {children}
     </label>
   );
@@ -809,7 +853,9 @@ function buildInspector(world, scenario, point, selectedHumanId, events = [], li
   if (!tile) return null;
   const humansOnTile = humans.filter((h) => h.alive !== false && h.x === activePoint.x && h.y === activePoint.y);
   const structures = [
+    ...(tile.structure_kind ? [tile.structure_kind] : []),
     ...(tile.feature ? [tile.feature] : []),
+    ...Object.values(world.structures ?? {}).filter((s) => s.x === activePoint.x && s.y === activePoint.y).map((s) => s.kind),
     ...(world.props ?? []).filter((p) => p.x === activePoint.x && p.y === activePoint.y).map((p) => p.kind)
   ];
   const selectedGroup = selectedHuman
@@ -819,7 +865,7 @@ function buildInspector(world, scenario, point, selectedHumanId, events = [], li
     : null;
   const selectedController = selectedGroup?.controller ?? null;
   const recentMemories = selectedHuman
-    ? events.filter((e) => e.actor_id === selectedHuman.id || e.target_agent_id === selectedHuman.id).slice(-6).reverse().map((e) => `Step ${e.tick}: ${e.description}`)
+    ? events.filter((e) => e.actor_id === selectedHuman.id || e.target_agent_id === selectedHuman.id).slice(-6).reverse().map((e) => `Live step ${e.tick}: ${e.description}`)
     : [];
   return {
     tile,
@@ -868,10 +914,37 @@ function mergeHumanFrame(human, liveFrame) {
       wood: frameHuman?.wood ?? human.inventory?.wood ?? 0,
       stone: frameHuman?.stone ?? human.inventory?.stone ?? 0
     },
+    weapon_kind: frameHuman?.weapon_kind ?? human.weapon_kind ?? "",
+    bonded_partner_id: frameHuman?.bonded_partner_id ?? human.bonded_partner_id ?? null,
+    home_structure_id: frameHuman?.home_structure_id ?? human.home_structure_id ?? null,
+    last_world_action_summary: frameHuman?.last_world_action_summary ?? human.last_world_action_summary ?? "",
     render_x: frameHuman.render_x ?? human.render_x ?? human.x,
     render_y: frameHuman.render_y ?? human.render_y ?? human.y,
     interaction_target_id: frameHuman.target_human_id ?? human.interaction_target_id,
     speaking: frameHuman.speaking ?? false
+  };
+}
+
+function summarizeActivityEvent(event, settings) {
+  const actionKinds = new Set(["MOVE", "REST", "CONSUME", "GATHER", "BUILD", "CRAFT", "INTERACT", "ATTACK", "REPRODUCE", "TRANSFER", "COMMUNICATE", "DEATH", "BIRTH"]);
+  if (!actionKinds.has(event.kind)) {
+    return null;
+  }
+  const group = (settings?.groups ?? []).find((entry) => entry.id === event.faction_id) ?? null;
+  return {
+    tick: event.tick,
+    time_ms: event.time_ms ?? null,
+    actor_id: event.actor_id,
+    human_name: event.metadata?.actor_name ?? event.actor_id ?? "Unknown",
+    group_name: group?.name ?? event.faction_id ?? "unknown",
+    provider: group?.controller?.provider ?? "unknown",
+    model: group?.controller?.model ?? "",
+    action: event.kind,
+    intent: event.metadata?.intent ?? event.description,
+    speech: event.metadata?.speech ?? "",
+    communication: event.kind === "COMMUNICATION" ? event.description : "",
+    result: event.description,
+    success: event.success,
   };
 }
 

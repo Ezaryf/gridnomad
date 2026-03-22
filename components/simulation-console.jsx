@@ -10,7 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 
 export default function SimulationConsole({
-  events,
+  activityItems = [],
   statusItems,
   debugLines,
   running,
@@ -19,11 +19,11 @@ export default function SimulationConsole({
 }) {
   const [activityFilter, setActivityFilter] = useState("all");
 
-  const filteredEvents = events.filter((e) => {
+  const filteredActivity = activityItems.filter((item) => {
     if (activityFilter === "all") return true;
-    if (activityFilter === "thoughts") return e.kind === "ACTION_PROPOSAL" || e.kind === "COMMUNICATION";
-    if (activityFilter === "movement") return e.kind === "MOVE";
-    if (activityFilter === "actions") return !["MOVE", "ACTION_PROPOSAL", "COMMUNICATION"].includes(e.kind);
+    if (activityFilter === "social") return Boolean(item.speech || item.communication);
+    if (activityFilter === "travel") return String(item.action ?? "") === "MOVE" || String(item.action ?? "").startsWith("MOVE_");
+    if (activityFilter === "failures") return item.success === false;
     return true;
   });
 
@@ -31,17 +31,17 @@ export default function SimulationConsole({
     <div className="flex h-full flex-col overflow-hidden">
       <Tabs defaultValue="activity" className="flex min-h-0 flex-1 flex-col">
         <div className="border-b border-white/8 px-3 py-1 flex items-center justify-between">
-          <TabsList className="grid w-[240px] grid-cols-3">
-            <TabsTrigger value="activity" className="text-[10px]">
-              <Activity className="mr-1 size-3" />
+          <TabsList className="grid w-[240px] grid-cols-3 h-8">
+            <TabsTrigger value="activity" className="text-[11px] h-full">
+              <Activity className="mr-1.5 size-3" />
               Activity
             </TabsTrigger>
-            <TabsTrigger value="status" className="text-[10px]">
-              <AlertTriangle className="mr-1 size-3" />
+            <TabsTrigger value="status" className="text-[11px] h-full">
+              <AlertTriangle className="mr-1.5 size-3" />
               Status
             </TabsTrigger>
-            <TabsTrigger value="debug" className="text-[10px]">
-              <TerminalSquare className="mr-1 size-3" />
+            <TabsTrigger value="debug" className="text-[11px] h-full">
+              <TerminalSquare className="mr-1.5 size-3" />
               Debug
             </TabsTrigger>
           </TabsList>
@@ -50,22 +50,35 @@ export default function SimulationConsole({
         <TabsContent value="activity" className="m-0 flex min-h-0 flex-1 flex-col">
           <div className="flex items-center gap-1 border-b border-white/5 bg-black/20 px-3 py-1.5">
             <FilterButton active={activityFilter === "all"} onClick={() => setActivityFilter("all")}>All</FilterButton>
-            <FilterButton active={activityFilter === "thoughts"} onClick={() => setActivityFilter("thoughts")}>Thoughts</FilterButton>
-            <FilterButton active={activityFilter === "actions"} onClick={() => setActivityFilter("actions")}>Actions</FilterButton>
-            <FilterButton active={activityFilter === "movement"} onClick={() => setActivityFilter("movement")}>Movement</FilterButton>
+            <FilterButton active={activityFilter === "social"} onClick={() => setActivityFilter("social")}>Social</FilterButton>
+            <FilterButton active={activityFilter === "travel"} onClick={() => setActivityFilter("travel")}>Travel</FilterButton>
+            <FilterButton active={activityFilter === "failures"} onClick={() => setActivityFilter("failures")}>Failures</FilterButton>
           </div>
           <ScrollArea className="flex-1 px-3 py-2">
-            {filteredEvents.length === 0 ? (
+            {filteredActivity.length === 0 ? (
               <Empty text="No activity matches the current filter." />
             ) : (
-              <div className="space-y-1.5 min-h-max pb-2">
-                {filteredEvents.slice(-32).reverse().map((event, i) => (
-                  <article key={`${event.tick}-${i}`} className="rounded-lg border border-white/20 bg-white/10 p-2 backdrop-blur-[10px] backdrop-saturate-180">
-                    <div className="mb-1 flex items-center justify-between gap-2 text-[8px] uppercase tracking-[0.18em] text-zinc-500">
-                      <span>{event.time_ms != null ? formatLiveTime(event.time_ms) : `Step ${event.tick}`}</span>
-                      <span>{event.kind}</span>
+              <div className="space-y-2.5 min-h-max pb-3">
+                {filteredActivity.slice(-32).reverse().map((item, i) => (
+                  <article key={`${item.tick}-${item.actor_id}-${i}`} className={`rounded-xl border p-3 backdrop-blur-[10px] backdrop-saturate-180 shadow-sm ${item.success === false ? "border-red-500/30 bg-red-500/10" : "border-white/20 bg-white/10"}`}>
+                    <div className="mb-2.5 flex items-center justify-between gap-2 text-[9px] uppercase tracking-[0.15em] text-zinc-500">
+                      <span>{item.time_ms != null ? `Live ${formatLiveTime(item.time_ms)}` : `Live step ${item.tick}`}</span>
+                      <span>{item.action}</span>
                     </div>
-                    <p className="text-[11px] leading-4 text-zinc-300">{event.description}</p>
+                    <div className="mb-2 flex flex-wrap items-center gap-1.5">
+                      <Badge variant="outline" className="h-5 text-[10px]">{item.human_name}</Badge>
+                      <Badge variant="outline" className="h-5 text-[10px]">{item.group_name}</Badge>
+                      <Badge variant={item.provider === "heuristic" ? "muted" : "default"} className="h-5 text-[10px]">
+                        {item.provider}{item.model ? ` · ${item.model}` : ""}
+                      </Badge>
+                      <Badge variant="outline" className={`h-5 text-[10px] ${item.success === false ? "border-red-500/40 bg-red-500/10 text-red-200" : ""}`}>
+                        {item.success === false ? "failed" : "ok"}
+                      </Badge>
+                    </div>
+                    <p className="text-[11px] leading-4 text-zinc-100">{item.intent || item.reason || "No intent recorded."}</p>
+                    {item.speech ? <p className="mt-1 text-[11px] leading-4 text-zinc-300">Speech: "{item.speech}"</p> : null}
+                    {item.communication ? <p className="mt-1 text-[11px] leading-4 text-zinc-400">Message: {item.communication}</p> : null}
+                    {item.result ? <p className="mt-1 text-[11px] leading-4 text-zinc-400">Result: {item.result}</p> : null}
                   </article>
                 ))}
               </div>
@@ -78,12 +91,12 @@ export default function SimulationConsole({
             {statusItems.length === 0 ? (
               <Empty text="Status updates appear when the simulation runs." />
             ) : (
-              <div className="space-y-1.5 min-h-max pb-2">
+              <div className="space-y-2 min-h-max pb-3">
                 {statusItems.slice(-24).reverse().map((item, i) => (
-                  <article key={`${item.tick ?? "s"}-${i}`} className="rounded-lg border border-white/20 bg-white/10 p-2 backdrop-blur-[10px] backdrop-saturate-180">
-                    <div className="mb-1 flex items-center justify-between gap-2 text-[8px] uppercase tracking-[0.18em] text-zinc-500">
+                  <article key={`${item.tick ?? "s"}-${i}`} className="rounded-xl border border-white/20 bg-white/10 p-3 backdrop-blur-[10px] backdrop-saturate-180 shadow-sm">
+                    <div className="mb-2 flex items-center justify-between gap-2 text-[9px] uppercase tracking-[0.15em] text-zinc-500">
                       <span className={item.type === "error" ? "text-red-400 font-bold" : ""}>{item.type}</span>
-                      <span>{item.time_ms != null ? formatLiveTime(item.time_ms) : item.tick != null ? `Step ${item.tick}` : "Sys"}</span>
+                      <span>{item.time_ms != null ? `Live ${formatLiveTime(item.time_ms)}` : item.tick != null ? `Live step ${item.tick}` : "Sys"}</span>
                     </div>
                     <p className={`text-[11px] leading-4 ${item.type === "error" ? "text-red-300" : "text-zinc-300"}`}>{item.message}</p>
                   </article>
@@ -98,12 +111,12 @@ export default function SimulationConsole({
             {debugLines.length === 0 ? (
               <Empty text="Debug output and provider stderr show here." />
             ) : (
-              <div className="space-y-1.5 min-h-max pb-2">
+              <div className="space-y-2 min-h-max pb-3">
                 {debugLines.slice(-30).reverse().map((line, i) => (
-                  <article key={`${line.tick ?? "d"}-${i}`} className="rounded-lg border border-white/6 bg-black/40 p-2">
-                    <div className="mb-1 flex items-center justify-between gap-2 text-[8px] uppercase tracking-[0.18em] text-zinc-500">
+                  <article key={`${line.tick ?? "d"}-${i}`} className="rounded-xl border border-white/6 bg-black/40 p-3 shadow-sm">
+                    <div className="mb-2 flex items-center justify-between gap-2 text-[9px] uppercase tracking-[0.15em] text-zinc-500">
                       <span className={line.type === "error" ? "text-red-500 font-bold" : ""}>{line.type}</span>
-                      <span>{line.tick != null ? `Step ${line.tick}` : "Sys"}</span>
+                      <span>{line.tick != null ? `Live step ${line.tick}` : "Sys"}</span>
                     </div>
                     <p className={`font-mono text-[10px] leading-4 ${line.type === "error" || line.type === "stderr" ? "text-red-300" : "text-zinc-300"}`}>{line.message}</p>
                   </article>
@@ -114,7 +127,7 @@ export default function SimulationConsole({
         </TabsContent>
       </Tabs>
       <div className="border-t border-white/8 px-3 py-1.5 text-[10px] uppercase tracking-[0.18em] text-zinc-500">
-        {running ? `Live ${formatLiveTime(liveTimeMs)} · Step ${currentTick}` : "Idle"}
+        {running ? `Live ${formatLiveTime(liveTimeMs)} · Live step ${currentTick}` : "Idle"}
       </div>
     </div>
   );
@@ -124,7 +137,7 @@ function FilterButton({ active, onClick, children }) {
   return (
     <button
       onClick={onClick}
-      className={`rounded-full px-2 py-0.5 text-[9px] font-medium uppercase tracking-widest transition-colors ${
+      className={`inline-flex h-6 items-center justify-center rounded-full px-3 text-[10px] font-medium uppercase tracking-widest transition-colors ${
         active 
           ? "bg-white/20 text-white" 
           : "bg-transparent text-zinc-500 hover:bg-white/10 hover:text-zinc-300"

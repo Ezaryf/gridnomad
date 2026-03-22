@@ -51,7 +51,9 @@ export default function CivilizationSettingsSheet({
   onProviderCredentialChange,
   onLaunchProviderLogin,
   onCreateOpencodeHome,
-  onCopyCommand
+  onCopyCommand,
+  nameValidation,
+  onRegenerateDuplicateNames
 }) {
   const groups = settings.groups ?? [];
 
@@ -137,11 +139,25 @@ export default function CivilizationSettingsSheet({
                   <h3 className="text-base font-semibold text-zinc-100">Human groups</h3>
                   <p className="text-sm text-zinc-400">Each group is a community. Every human inside it inherits the same AI controller. Strict AI-only mode is designed for up to 8 humans total.</p>
                 </div>
-                <Button variant="secondary" onClick={onAddGroup}>
-                  <Plus className="size-4" />
-                  Add group
-                </Button>
+                <div className="flex gap-2">
+                  {!nameValidation?.valid ? (
+                    <Button variant="outline" onClick={onRegenerateDuplicateNames}>
+                      Regenerate duplicate names
+                    </Button>
+                  ) : null}
+                  <Button variant="secondary" onClick={onAddGroup}>
+                    <Plus className="size-4" />
+                    Add group
+                  </Button>
+                </div>
               </div>
+
+              {!nameValidation?.valid ? (
+                <div className="mb-4 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">
+                  <p className="font-medium">Run and save are blocked until every human has a unique name.</p>
+                  <p className="mt-1 text-red-200/80">{nameValidation.message}</p>
+                </div>
+              ) : null}
 
               <div className="space-y-6">
                 {groups.map((group) => (
@@ -159,6 +175,12 @@ export default function CivilizationSettingsSheet({
                       </div>
                     </CardHeader>
                     <CardContent className="space-y-5">
+                      {(nameValidation?.byGroupId?.[group.id] ?? []).length ? (
+                        <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-xs leading-5 text-red-100">
+                          Duplicate or missing names in this group: {(nameValidation.byGroupId[group.id] ?? []).map((item) => item.name || item.human_id).join(", ")}
+                        </div>
+                      ) : null}
+
                       <div className="grid gap-4 sm:grid-cols-2">
                         <LabeledField label="Group name">
                           <Input value={group.name} onChange={(event) => onUpdateGroup(group.id, { name: event.target.value })} />
@@ -193,7 +215,11 @@ export default function CivilizationSettingsSheet({
                         group={group}
                         controller={group.controller}
                         catalog={providerCatalogs[`group:${group.id}`]}
-                        onRefreshProviderCatalog={(provider, credential = "") => onRefreshProviderCatalog("group", group.id, provider, { credential, cliHome: group.controller?.cliHome ?? "" })}
+                        onRefreshProviderCatalog={(provider, credential = "") => onRefreshProviderCatalog("group", group.id, provider, {
+                          credential,
+                          cliHome: group.controller?.cliHome ?? "",
+                          googleCloudProject: group.controller?.googleCloudProject ?? ""
+                        })}
                         onProviderChange={(provider) => onProviderChange(group.id, provider)}
                         onCredentialChange={(credential) => onProviderCredentialChange(group.id, credential)}
                         onUpdateController={(patch) => onUpdateGroupController(group.id, patch)}
@@ -207,6 +233,8 @@ export default function CivilizationSettingsSheet({
                       <HumanRosterEditor
                         group={group}
                         onUpdateHuman={onUpdateHuman}
+                        nameValidation={nameValidation}
+                        onRegenerateDuplicateNames={onRegenerateDuplicateNames}
                       />
                     </CardContent>
                   </Card>
@@ -221,7 +249,7 @@ export default function CivilizationSettingsSheet({
             </div>
             <div className="flex gap-2">
               <Button variant="outline" onClick={onGenerateWorld} disabled={busy}>Generate world</Button>
-              <Button onClick={onSaveSettings} disabled={busy}>Save settings</Button>
+              <Button onClick={onSaveSettings} disabled={busy || !nameValidation?.valid}>Save settings</Button>
             </div>
           </SheetFooter>
         </Tabs>
@@ -380,7 +408,68 @@ function ControllerCard({
           </>
         ) : null}
 
-        {providerUsesLogin(provider) && provider !== "opencode" ? (
+        {provider === "gemini-cli" ? (
+          <>
+            <div className="sm:col-span-2 rounded-xl border border-white/10 bg-white/[0.03] p-3 text-xs leading-5 text-zinc-400">
+              <p className="font-medium text-zinc-200">Gemini CLI health: {catalog?.health_state ?? catalog?.auth_status ?? "login_required"}</p>
+              <p>{catalog?.login_hint ?? "Use your Google account in Gemini CLI, then refresh status and models."}</p>
+              {catalog?.gemini_path ? <p className="mt-1 text-zinc-500">CLI executable: {catalog.gemini_path}</p> : null}
+              {catalog?.resolved_cli_home ? <p className="mt-1 text-zinc-500">User-global home: {catalog.resolved_cli_home}</p> : null}
+              {controller?.googleCloudProject ? <p className="mt-1 text-zinc-500">Google Cloud Project: {controller.googleCloudProject}</p> : null}
+            </div>
+            <div className="flex flex-wrap items-end gap-2 sm:col-span-2">
+              <Button
+                variant="outline"
+                onClick={() => onCopyCommand("Gemini CLI login command", catalog?.manual_commands?.powershell?.login ?? "")}
+                disabled={!catalog?.manual_commands?.powershell?.login}
+              >
+                <KeyRound className="size-4" />
+                Copy login command
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => onCopyCommand("Gemini CLI verify command", catalog?.manual_commands?.powershell?.verify ?? "")}
+                disabled={!catalog?.manual_commands?.powershell?.verify}
+              >
+                Copy verify command
+              </Button>
+              <Button variant="outline" onClick={() => onRefreshProviderCatalog("gemini-cli", "")}>Refresh status</Button>
+              <Button variant="outline" onClick={() => onRefreshProviderCatalog("gemini-cli", "")}>Refresh models</Button>
+            </div>
+            {catalog?.manual_commands?.powershell?.login ? (
+              <div className="sm:col-span-2 rounded-xl border border-white/10 bg-black/30 p-3">
+                <p className="mb-2 text-[10px] uppercase tracking-[0.18em] text-zinc-500">Manual Gemini CLI login</p>
+                <p className="mb-2 text-xs leading-5 text-zinc-400">
+                  1. Copy the login command and run it in your own terminal. 2. Finish the Google login flow in the browser or terminal prompt. 3. Run the verify command if you want to confirm the CLI is responding. 4. Return here and refresh status and models.
+                </p>
+                <div className="grid gap-2 md:grid-cols-2">
+                  <InlineCommand label="PowerShell login" value={catalog.manual_commands.powershell.login} />
+                  <InlineCommand label="Command Prompt login" value={catalog.manual_commands.cmd?.login ?? ""} />
+                  <InlineCommand label="Verify auth" value={catalog.manual_commands.powershell.verify} />
+                </div>
+              </div>
+            ) : null}
+            {(catalog?.stdout || catalog?.stderr) ? (
+              <details className="sm:col-span-2 rounded-xl border border-white/10 bg-black/30 p-3 text-xs text-zinc-400">
+                <summary className="cursor-pointer text-zinc-200">Raw Gemini CLI probe output</summary>
+                {catalog?.stdout ? (
+                  <div className="mt-3">
+                    <p className="mb-1 text-[10px] uppercase tracking-[0.18em] text-zinc-500">Stdout</p>
+                    <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-[10px] leading-4 text-zinc-300">{catalog.stdout}</pre>
+                  </div>
+                ) : null}
+                {catalog?.stderr ? (
+                  <div className="mt-3">
+                    <p className="mb-1 text-[10px] uppercase tracking-[0.18em] text-zinc-500">Stderr</p>
+                    <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-[10px] leading-4 text-zinc-300">{catalog.stderr}</pre>
+                  </div>
+                ) : null}
+              </details>
+            ) : null}
+          </>
+        ) : null}
+
+        {providerUsesLogin(provider) && !["opencode", "gemini-cli"].includes(provider) ? (
           <div className="flex flex-wrap items-end gap-2 sm:col-span-2">
             <Button variant="outline" onClick={() => onLaunchProviderLogin(provider)}>
               <KeyRound className="size-4" />
@@ -437,7 +526,7 @@ function ControllerCard({
   );
 }
 
-function HumanRosterEditor({ group, onUpdateHuman }) {
+function HumanRosterEditor({ group, onUpdateHuman, nameValidation, onRegenerateDuplicateNames }) {
   const humans = group?.humans ?? [];
   const [selectedHumanId, setSelectedHumanId] = useState(humans[0]?.id ?? null);
 
@@ -478,6 +567,7 @@ function HumanRosterEditor({ group, onUpdateHuman }) {
             <div className="space-y-2 p-3">
               {humans.map((human) => {
                 const active = human.id === selectedHuman?.id;
+                const issue = nameValidation?.byHumanId?.[human.id] ?? null;
                 return (
                   <button
                     key={human.id}
@@ -491,11 +581,16 @@ function HumanRosterEditor({ group, onUpdateHuman }) {
                   >
                     <div className="flex items-center justify-between gap-2">
                       <p className="truncate text-sm font-medium text-zinc-100">{human.name}</p>
-                      <span className="text-[10px] text-zinc-500">#{human.id.split("-").pop()}</span>
+                      <span className={`text-[10px] ${issue ? "text-red-300" : "text-zinc-500"}`}>
+                        {issue ? issue.type.replaceAll("_", " ") : `#${human.id.split("-").pop()}`}
+                      </span>
                     </div>
                     <p className="mt-1 line-clamp-2 text-[11px] leading-4 text-zinc-400">
                       {human.persona_summary || "No persona summary yet."}
                     </p>
+                    {issue ? (
+                      <p className="mt-2 text-[11px] leading-4 text-red-200">{issue.message}</p>
+                    ) : null}
                     <div className="mt-2 flex flex-wrap gap-1">
                       <Badge variant="muted" className="text-[10px]">
                         {human.social_style || "social"}
@@ -541,6 +636,15 @@ function HumanRosterEditor({ group, onUpdateHuman }) {
                 </Button>
               </div>
             </div>
+
+            {nameValidation?.byHumanId?.[selectedHuman.id] ? (
+              <div className="mb-4 rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-xs leading-5 text-red-100">
+                <p className="font-medium">{nameValidation.byHumanId[selectedHuman.id].message}</p>
+                <Button variant="outline" size="sm" className="mt-2 border-red-500/30 bg-transparent text-red-100 hover:bg-red-500/20" onClick={onRegenerateDuplicateNames}>
+                  Regenerate duplicate names
+                </Button>
+              </div>
+            ) : null}
 
             <div className="grid gap-3 sm:grid-cols-2">
               <LabeledField label="Human name">
