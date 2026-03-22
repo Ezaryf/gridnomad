@@ -44,7 +44,7 @@ export default function SimulationConsole({
                 {events.slice(-32).reverse().map((event, i) => (
                   <article key={`${event.tick}-${i}`} className="rounded-lg border border-white/20 bg-white/10 p-2 backdrop-blur-[10px] backdrop-saturate-180">
                     <div className="mb-1 flex items-center justify-between gap-2 text-[8px] uppercase tracking-[0.18em] text-zinc-500">
-                      <span>{event.time_ms != null ? formatLiveTime(event.time_ms) : `Beat ${event.tick}`}</span>
+                      <span>{event.time_ms != null ? formatLiveTime(event.time_ms) : `Step ${event.tick}`}</span>
                       <span>{event.kind}</span>
                     </div>
                     <p className="text-[11px] leading-4 text-zinc-300">{event.description}</p>
@@ -65,7 +65,7 @@ export default function SimulationConsole({
                   <article key={`${item.tick ?? "s"}-${i}`} className="rounded-lg border border-white/20 bg-white/10 p-2 backdrop-blur-[10px] backdrop-saturate-180">
                     <div className="mb-1 flex items-center justify-between gap-2 text-[8px] uppercase tracking-[0.18em] text-zinc-500">
                       <span>{item.type}</span>
-                      <span>{item.time_ms != null ? formatLiveTime(item.time_ms) : item.tick != null ? `Beat ${item.tick}` : "Sys"}</span>
+                      <span>{item.time_ms != null ? formatLiveTime(item.time_ms) : item.tick != null ? `Step ${item.tick}` : "Sys"}</span>
                     </div>
                     <p className="text-[11px] leading-4 text-zinc-300">{item.message}</p>
                   </article>
@@ -85,7 +85,7 @@ export default function SimulationConsole({
                   <article key={`${line.tick ?? "d"}-${i}`} className="rounded-lg border border-white/6 bg-black/40 p-2">
                     <div className="mb-1 flex items-center justify-between gap-2 text-[8px] uppercase tracking-[0.18em] text-zinc-500">
                       <span>{line.type}</span>
-                      <span>{line.tick != null ? `Beat ${line.tick}` : "Sys"}</span>
+                      <span>{line.tick != null ? `Step ${line.tick}` : "Sys"}</span>
                     </div>
                     <p className="font-mono text-[10px] leading-4 text-zinc-300">{line.message}</p>
                   </article>
@@ -96,7 +96,7 @@ export default function SimulationConsole({
         </TabsContent>
       </Tabs>
       <div className="border-t border-white/8 px-3 py-1.5 text-[10px] uppercase tracking-[0.18em] text-zinc-500">
-        {running ? `Live ${formatLiveTime(liveTimeMs)} · Beat ${currentTick}` : "Idle"}
+        {running ? `Live ${formatLiveTime(liveTimeMs)} · Step ${currentTick}` : "Idle"}
       </div>
     </div>
   );

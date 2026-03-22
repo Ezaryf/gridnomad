@@ -31,6 +31,7 @@ export default function PixelWorldMap({
   overlays,
   selectedTile,
   selectedHumanId,
+  cameraLocked,
   onHoverTile,
   onSelectTile,
   onSelectHuman
@@ -96,6 +97,7 @@ export default function PixelWorldMap({
         Application,
         Assets,
         BlurFilter,
+        ColorMatrixFilter,
         Container,
         SCALE_MODES,
         Sprite,
@@ -128,6 +130,9 @@ export default function PixelWorldMap({
       });
       viewport.drag().wheel().pinch().decelerate();
       app.stage.addChild(viewport);
+
+      const envFilter = new ColorMatrixFilter();
+      app.stage.filters = [envFilter];
 
       const terrainLayer = new Container();
       const territoryLayer = new Container();
@@ -184,6 +189,8 @@ export default function PixelWorldMap({
           fxLayer,
           uiLayer
         },
+        envFilter,
+        weatherSprites: [],
         hoverRing,
         selectRing,
         agentPositions: new Map(),
@@ -288,8 +295,16 @@ export default function PixelWorldMap({
       return;
     }
     renderDynamicWorld(runtimeRef.current, world, overlays, liveFrame, selectedHumanId);
+    renderEnvironment(runtimeRef.current, world);
     syncFocusSprites(runtimeRef.current, selectedTile, hoverTileRef.current);
   }, [world, liveFrame, overlays?.humans, selectedHumanId, selectedTile]);
+
+  useEffect(() => {
+    if (runtimeRef.current) {
+      runtimeRef.current.cameraLocked = cameraLocked;
+      runtimeRef.current.followHumanId = cameraLocked ? selectedHumanId : null;
+    }
+  }, [cameraLocked, selectedHumanId]);
 
   function nudgeZoom(multiplier) {
     const runtime = runtimeRef.current;
@@ -616,6 +631,65 @@ function renderDynamicWorld(runtime, world, overlays, liveFrame, selectedHumanId
   runtime.humanHitTargets = nextHumanHitTargets;
 }
 
+function renderEnvironment(runtime, world) {
+  if (!runtime || !world) return;
+  const { envFilter, layers: { fxLayer }, pixi: { Sprite, Texture } } = runtime;
+
+  const time = world.time_of_day ?? 8;
+  envFilter.reset();
+
+  if (time >= 20 || time <= 5) {
+    envFilter.brightness(0.4, false);
+    envFilter.tint(0x334477, false);
+  } else if (time >= 18 && time < 20) {
+    envFilter.brightness(0.7, false);
+    envFilter.tint(0xffaa66, false);
+  } else if (time > 5 && time <= 7) {
+    envFilter.brightness(0.9, false);
+    envFilter.tint(0xffd0a0, false);
+  }
+
+  if (runtime.currentWeather !== world.weather) {
+    runtime.currentWeather = world.weather || "clear";
+    
+    for (const ws of runtime.weatherSprites) {
+      ws.sprite.destroy();
+    }
+    runtime.weatherSprites = [];
+
+    if (runtime.currentWeather === "rain" || runtime.currentWeather === "storm") {
+      const count = runtime.currentWeather === "storm" ? 350 : 150;
+      for (let i = 0; i < count; i++) {
+        const sprite = new Sprite(Texture.WHITE);
+        sprite.width = 1;
+        sprite.height = Math.random() * 6 + 4;
+        sprite.tint = 0x88bbff;
+        sprite.alpha = 0.4;
+        sprite.x = Math.random() * runtime.viewport.worldWidth;
+        sprite.y = Math.random() * runtime.viewport.worldHeight;
+        fxLayer.addChild(sprite);
+        runtime.weatherSprites.push({ sprite, speed: Math.random() * 8 + 12, type: "rain" });
+      }
+      if (runtime.currentWeather === "storm") {
+         envFilter.brightness(0.6, false);
+         envFilter.tint(0x667788, false);
+      }
+    } else if (runtime.currentWeather === "snow") {
+      for (let i = 0; i < 200; i++) {
+        const sprite = new Sprite(Texture.WHITE);
+        sprite.width = 2;
+        sprite.height = 2;
+        sprite.tint = 0xffffff;
+        sprite.alpha = 0.6;
+        sprite.x = Math.random() * runtime.viewport.worldWidth;
+        sprite.y = Math.random() * runtime.viewport.worldHeight;
+        fxLayer.addChild(sprite);
+        runtime.weatherSprites.push({ sprite, speed: Math.random() * 1.5 + 1.5, drift: Math.random() * 2 - 1, type: "snow" });
+      }
+    }
+  }
+}
+
 function generateProceduralTextures(runtime) {
   const { Graphics } = runtime.pixi;
   const { app } = runtime;
@@ -848,6 +922,28 @@ function animateRuntime(runtime, deltaMs, setZoomPercent) {
     return;
   }
   const delta = deltaMs / 1000;
+
+  if (runtime.cameraLocked && runtime.followHumanId && runtime.viewport) {
+    const hitTarget = runtime.humanHitTargets.find((h) => h.id === runtime.followHumanId);
+    if (hitTarget) {
+      const currentX = runtime.viewport.center.x;
+      const currentY = runtime.viewport.center.y;
+      const targetX = hitTarget.worldX;
+      const targetY = hitTarget.worldY;
+      
+      const dist = Math.hypot(targetX - currentX, targetY - currentY);
+      if (dist > 1500) {
+        runtime.viewport.moveCenter(targetX, targetY);
+      } else {
+        const lerp = 1 - Math.pow(0.85, deltaMs / 16.66);
+        runtime.viewport.moveCenter(
+          currentX + (targetX - currentX) * lerp,
+          currentY + (targetY - currentY) * lerp
+        );
+      }
+    }
+  }
+
   for (const fog of runtime.fogSprites) {
     fog.sprite.x += delta * 24 * fog.speed * 60;
     if (fog.sprite.x > runtime.viewport.worldWidth + 80) {

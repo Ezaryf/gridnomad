@@ -4,10 +4,11 @@ import { spawn } from "node:child_process";
 
 import { NextResponse } from "next/server";
 
-import { buildRuntimeControllerMap, normalizeSettings, synthesizeScenario } from "@/lib/civilization-setup";
+import { buildRuntimeControllerMap, normalizeSettings, STRICT_MAX_TOTAL_POPULATION, synthesizeScenario } from "@/lib/civilization-setup";
 import {
   ROOT,
   ensureProjectData,
+  inspectOpencode,
   readScenario,
   readSettings,
   worldArgsFromSettings
@@ -23,10 +24,14 @@ export async function POST(request) {
   await ensureProjectData();
   const baseScenario = await readScenario();
   const mergedSettings = payload.settings ? normalizeSettings(baseScenario, payload.settings) : await readSettings();
+  const readiness = await validateStrictSimulationSetup(mergedSettings);
+  if (!readiness.ok) {
+    return NextResponse.json(readiness, { status: 400 });
+  }
   const synthesizedScenario = synthesizeScenario(baseScenario, mergedSettings);
   const durationSeconds = Math.max(10, Number(mergedSettings.world?.run_duration_seconds ?? 80));
-  const decisionIntervalMs = Math.max(250, Number(mergedSettings.world?.decision_interval_ms ?? 2000));
-  const ticks = Math.max(1, Math.ceil((durationSeconds * 1000) / decisionIntervalMs));
+  const microstepIntervalMs = Math.max(16, Number(mergedSettings.world?.microstep_interval_ms ?? 125));
+  const ticks = Math.max(1, Math.ceil((durationSeconds * 1000) / microstepIntervalMs));
   const runDir = path.join(ROOT, "runs", `web-stream-${new Date().toISOString().replace(/[:.]/g, "-")}`);
   await fs.mkdir(runDir, { recursive: true });
 
@@ -116,4 +121,76 @@ function quoteWindowsArgument(value) {
     return value;
   }
   return `"${value.replace(/"/g, '\\"')}"`;
+}
+
+
+async function validateStrictSimulationSetup(settings) {
+  const groups = settings.groups ?? [];
+  const totalPopulation = groups.reduce((sum, group) => sum + Number(group.population_count ?? 0), 0);
+  if (totalPopulation > STRICT_MAX_TOTAL_POPULATION) {
+    return {
+      ok: false,
+      reason: "population_limit",
+      message: `Strict mode supports at most ${STRICT_MAX_TOTAL_POPULATION} humans total.`,
+      total_population: totalPopulation,
+      limit: STRICT_MAX_TOTAL_POPULATION,
+    };
+  }
+
+  for (const group of groups) {
+    const controller = group.controller ?? {};
+    const provider = String(controller.provider ?? "heuristic");
+    const model = String(controller.model ?? "").trim();
+    if (provider === "heuristic") {
+      continue;
+    }
+    if (provider === "opencode") {
+      const inspection = await inspectOpencode({
+        credential: controller.opencodeProvider ?? "",
+        cliHome: controller.cliHome ?? "",
+        isolated: Boolean(controller.cliHome),
+      });
+      if (inspection.health_state !== "ready") {
+        return {
+          ok: false,
+          reason: inspection.health_state,
+          message: `${group.name} is not ready for OpenCode: ${inspection.login_hint}`,
+          group_id: group.id,
+          provider,
+          health_state: inspection.health_state,
+          detected_cli_home: inspection.detected_cli_home,
+        };
+      }
+      if (!model) {
+        return {
+          ok: false,
+          reason: "model_required",
+          message: `${group.name} must choose an OpenCode model before starting a strict run.`,
+          group_id: group.id,
+          provider,
+        };
+      }
+      continue;
+    }
+    if (["openai", "anthropic", "gemini-api"].includes(provider) && !String(controller.apiKey ?? controller.googleApiKey ?? "").trim()) {
+      return {
+        ok: false,
+        reason: "missing_api_key",
+        message: `${group.name} is using ${provider} without an API key.`,
+        group_id: group.id,
+        provider,
+      };
+    }
+    if (!model) {
+      return {
+        ok: false,
+        reason: "model_required",
+        message: `${group.name} must choose a model before starting a strict run.`,
+        group_id: group.id,
+        provider,
+      };
+    }
+  }
+
+  return { ok: true };
 }

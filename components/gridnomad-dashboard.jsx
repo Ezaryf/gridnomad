@@ -33,6 +33,7 @@ import {
   normalizeSettings,
   providerDisplayName,
   removeGroup,
+  simulationReadiness,
   synthesizeScenario,
   totalConfiguredPopulation,
   updateGroup,
@@ -79,6 +80,7 @@ export default function GridNomadDashboard() {
   const [selectedTile, setSelectedTile] = useState(null);
   const [hoverTile, setHoverTile] = useState(null);
   const [selectedHumanId, setSelectedHumanId] = useState(null);
+  const [cameraLocked, setCameraLocked] = useState(false);
   const [overlays, setOverlays] = useState(INITIAL_OVERLAYS);
   const [loading, setLoading] = useState(true);
   const [working, setWorking] = useState(false);
@@ -103,6 +105,7 @@ export default function GridNomadDashboard() {
     [world, scenario, focusedTile, selectedHumanId, events, liveFrame]
   );
   const metrics = useMemo(() => buildMetrics(world, settings), [world, settings]);
+  const readiness = useMemo(() => simulationReadiness(settings, providerCatalogs), [settings, providerCatalogs]);
 
   useEffect(() => {
     void bootstrap();
@@ -113,7 +116,7 @@ export default function GridNomadDashboard() {
     if (!selectedHumanId || !world) return;
     const baseHuman = findHumans(world).find((e) => e.id === selectedHumanId && e.alive !== false);
     const human = baseHuman ? mergeHumanFrame(baseHuman, liveFrame) : null;
-    if (!human) { setSelectedHumanId(null); return; }
+    if (!human) { setSelectedHumanId(null); setCameraLocked(false); return; }
     setSelectedTile({ x: human.x, y: human.y });
   }, [selectedHumanId, world, liveFrame]);
 
@@ -162,7 +165,10 @@ export default function GridNomadDashboard() {
       const response = await fetch("/api/providers/opencode/status", { cache: "no-store" });
       const payload = await response.json();
       setOpencodeCredentials(payload.credentials ?? []);
-      if (!silent) pushStatus("provider", `OpenCode ${payload.health_state ?? "status"} · ${(payload.credentials ?? []).length} credentials.`);
+      if (!silent) {
+        const detail = payload.environment_source === "project-local" ? "project-local home" : "user-global home";
+        pushStatus("provider", `OpenCode ${payload.health_state ?? "status"} · ${(payload.credentials ?? []).length} credentials · ${detail}.`);
+      }
       if (payload.stderr) pushDebug("provider", payload.stderr);
     } catch (error) {
       if (!silent) pushStatus("error", "Could not refresh OpenCode credentials.");
@@ -177,8 +183,25 @@ export default function GridNomadDashboard() {
       const response = await fetch(`/api/providers/catalog?${params.toString()}`, { cache: "no-store" });
       const payload = await response.json();
       setProviderCatalogs((c) => ({ ...c, [catalogKey(scope, entityId)]: payload }));
-      if (!silent) pushStatus("provider", payload.ok ? `${payload.models?.length ?? 0} models for ${providerDisplayName(provider)}.` : `Could not load models.`);
+      if (scope === "group") {
+        const controllerPatch = {
+          availableModels: payload.models ?? [],
+          supportsModelListing: Boolean(payload.supports_model_listing),
+          supportsManualModelEntry: Boolean(payload.supports_manual_model_entry),
+          ...(provider === "opencode" ? { cliHome: payload.cli_home_root ?? "" } : { cliHome: "" })
+        };
+        patchGroupController(entityId, controllerPatch);
+      }
+      if (!silent) {
+        if (provider === "opencode") {
+          const homeLabel = payload.environment_source === "project-local" ? "project-local home" : "user-global home";
+          pushStatus("provider", `OpenCode ${payload.health_state ?? "status"} · ${payload.models?.length ?? 0} models · ${homeLabel}.`);
+        } else {
+          pushStatus("provider", payload.ok ? `${payload.models?.length ?? 0} models for ${providerDisplayName(provider)}.` : `Could not load models.`);
+        }
+      }
       if (payload.stderr) pushDebug("provider", payload.stderr);
+      if (payload.global_stderr) pushDebug("provider", payload.global_stderr);
     } catch (error) {
       if (!silent) pushStatus("error", `Could not load ${providerDisplayName(provider)} catalog.`);
       pushDebug("provider", String(error));
@@ -239,6 +262,11 @@ export default function GridNomadDashboard() {
 
   async function runSimulationLive() {
     if (running) return;
+    if (!readiness.ready) {
+      pushStatus("error", readiness.message);
+      setStatusMessage(readiness.message);
+      return;
+    }
     setRunning(true);
     setEvents([]); setStatusItems([]); setDebugLines([]); setCurrentTick(0); setLiveTimeMs(0); setLiveFrame(null); frameQueueRef.current = [];
     setStatusMessage("Starting live stream...");
@@ -246,7 +274,17 @@ export default function GridNomadDashboard() {
     abortRef.current = controller;
     try {
       const response = await fetch("/api/simulations/stream", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ settings }), signal: controller.signal });
-      if (!response.ok || !response.body) { const text = await response.text().catch(() => ""); throw new Error(text || `Stream failed (${response.status}).`); }
+      if (!response.ok || !response.body) {
+        const text = await response.text().catch(() => "");
+        let message = text || `Stream failed (${response.status}).`;
+        try {
+          const payload = JSON.parse(text);
+          message = payload.message ?? message;
+        } catch {
+          // keep raw text when the response is not JSON
+        }
+        throw new Error(message);
+      }
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
@@ -260,7 +298,7 @@ export default function GridNomadDashboard() {
       }
       if (buffer.trim()) handleStreamLine(buffer);
     } catch (error) {
-      if (error?.name !== "AbortError") { pushStatus("error", "Stream failed."); pushDebug("stream", String(error)); setStatusMessage("Stream failed."); }
+      if (error?.name !== "AbortError") { pushStatus("error", String(error)); pushDebug("stream", String(error)); setStatusMessage(String(error)); }
     } finally {
       abortRef.current = null;
       setRunning(false);
@@ -275,7 +313,7 @@ export default function GridNomadDashboard() {
     if (payload.type === "frame") { frameQueueRef.current.push(payload); return; }
     if (payload.type === "snapshot" && payload.snapshot?.world) { setWorld(payload.snapshot.world); setCurrentTick(payload.tick ?? payload.snapshot.world.tick ?? 0); return; }
     if (payload.type === "event" && payload.event) { setEvents((c) => [...c, { ...payload.event, time_ms: payload.time_ms ?? null }]); return; }
-    if (payload.type === "status") { setCurrentTick(payload.tick ?? 0); setLiveTimeMs(payload.time_ms ?? 0); pushStatus("status", payload.message ?? "Beat complete.", payload.tick, payload.time_ms ?? null); setStatusMessage(payload.message ?? "Beat complete."); return; }
+    if (payload.type === "status") { setCurrentTick(payload.tick ?? 0); setLiveTimeMs(payload.time_ms ?? 0); pushStatus("status", payload.message ?? "Live step complete.", payload.tick, payload.time_ms ?? null); setStatusMessage(payload.message ?? "Live step complete."); return; }
     if (payload.type === "run_started") {
       pushStatus("run_started", `Live run: ${payload.run_duration_seconds ?? settings.world?.run_duration_seconds ?? 0}s at ${payload.playback_speed ?? settings.world?.playback_speed ?? 1}x.`, 0, 0);
       for (const ctrl of payload.controllers ?? []) pushStatus("controller", `${ctrl.group_name ?? ctrl.faction_id}: ${providerDisplayName(ctrl.provider)}${ctrl.model ? ` (${ctrl.model})` : ""}`, 0, 0);
@@ -283,6 +321,14 @@ export default function GridNomadDashboard() {
       return;
     }
     if (payload.type === "provider_status") { pushStatus("provider", `${payload.faction_id}: ${payload.message ?? "provider update"}`, payload.tick, payload.time_ms ?? null); pushDebug("provider", `${payload.faction_id}: ${payload.message ?? ""}`, payload.tick); return; }
+    if (payload.type === "run_failed") {
+      if (payload.snapshot?.world) setWorld(payload.snapshot.world);
+      setLiveTimeMs(payload.time_ms ?? liveTimeMs);
+      pushStatus("error", payload.message ?? "Strict run failed.", payload.tick, payload.time_ms ?? null);
+      pushDebug("error", payload.message ?? "Strict run failed.", payload.tick);
+      setStatusMessage(payload.message ?? "Strict run failed.");
+      return;
+    }
     if (payload.type === "stderr") { pushDebug("stderr", payload.text ?? payload.message ?? "", payload.tick); return; }
     if (payload.type === "complete") { if (payload.snapshot?.world) setWorld(payload.snapshot.world); setLiveTimeMs(payload.time_ms ?? liveTimeMs); pushStatus("complete", `Done. ${payload.event_count ?? 0} events.`, payload.tick, payload.time_ms ?? null); setStatusMessage(`Complete after ${formatLiveTime(payload.time_ms ?? liveTimeMs)}.`); return; }
     if (payload.type === "error") { pushStatus("error", payload.message ?? "Error.", payload.tick); pushDebug("error", payload.message ?? "Error.", payload.tick); setStatusMessage(payload.message ?? "Error."); return; }
@@ -311,7 +357,14 @@ export default function GridNomadDashboard() {
   }
 
   async function handleProviderChange(groupId, provider) {
-    patchGroupController(groupId, { provider, model: "" });
+    patchGroupController(groupId, {
+      provider,
+      model: "",
+      availableModels: [],
+      supportsModelListing: false,
+      supportsManualModelEntry: false,
+      ...(provider === "opencode" ? {} : { opencodeProvider: "", cliHome: "" })
+    });
     const group = settings.groups.find((i) => i.id === groupId);
     if (provider !== "heuristic") await refreshProviderCatalog("group", groupId, provider, group?.controller?.opencodeProvider ?? "");
   }
@@ -406,7 +459,7 @@ export default function GridNomadDashboard() {
         <div className="flex-1" />
 
         <Button size="sm" className="h-7" onClick={() => generateWorld()} disabled={busy}>Generate</Button>
-        <Button size="sm" variant="secondary" className="h-7" onClick={runSimulationLive} disabled={busy}>
+        <Button size="sm" variant="secondary" className="h-7" onClick={runSimulationLive} disabled={busy || !readiness.ready} title={readiness.ready ? "Run strict AI simulation" : readiness.message}>
           <Play className="size-3.5" />
           Run
         </Button>
@@ -479,6 +532,7 @@ export default function GridNomadDashboard() {
                 overlays={overlays}
                 selectedTile={selectedTile}
                 selectedHumanId={selectedHumanId}
+                cameraLocked={cameraLocked}
                 onHoverTile={setHoverTile}
                 onSelectTile={handleSelectTile}
                 onSelectHuman={handleSelectHuman}
@@ -487,6 +541,15 @@ export default function GridNomadDashboard() {
               <div className="flex h-full items-center justify-center text-sm text-zinc-500">
                 Generate a world to populate the sandbox.
               </div>
+            )}
+            
+            {cameraLocked && inspector?.selectedHuman && (
+              <ThoughtStream 
+                human={inspector.selectedHuman}
+                group={groupLabel(scenario, inspector.selectedHuman.faction_id)}
+                isLocked={cameraLocked}
+                onToggleLock={() => setCameraLocked(l => !l)}
+              />
             )}
           </main>
           <div className="h-[220px] shrink-0 border-t border-white/20 bg-[rgba(4,4,4,0.96)]">
@@ -512,6 +575,8 @@ export default function GridNomadDashboard() {
                 communications={world?.communications ?? []}
                 className="h-full"
                 panelHeightClass="flex-1 min-h-0"
+                cameraLocked={cameraLocked}
+                onToggleCameraLock={() => setCameraLocked(l => !l)}
               />
             </div>
           </aside>
@@ -519,14 +584,21 @@ export default function GridNomadDashboard() {
       </div>
 
       {/* ── STATUS BAR ── */}
-      <footer className="flex h-8 items-center justify-between border-t border-white/20 bg-black/40 px-4 text-[10px] backdrop-blur-[10px] backdrop-saturate-180">
+      <footer className="flex h-8 items-center gap-2 border-t border-white/20 bg-black/40 px-4 text-[10px] backdrop-blur-[10px] backdrop-saturate-180">
         <Badge variant={running ? "default" : "outline"} className="h-5 text-[10px]">
           {running ? (playbackPaused ? "● Paused" : "● Live") : "Standing by"}
         </Badge>
-        <span className="flex-1 truncate text-[11px] text-zinc-500">{statusMessage}</span>
-        <Badge variant="outline" className="h-5 text-[10px]">Beat {currentTick}</Badge>
+        <span className="flex-1 truncate text-[11px] text-zinc-500 px-2">{statusMessage}</span>
+        {world && (
+          <>
+            <Badge variant="outline" className="h-5 text-[10px]">Time {world.time_of_day}:00</Badge>
+            <Badge variant="outline" className="h-5 text-[10px] capitalize">{world.weather}</Badge>
+          </>
+        )}
+        <Badge variant="outline" className="h-5 text-[10px]">Step {currentTick}</Badge>
         <Badge variant="outline" className="h-5 text-[10px]">{formatLiveTime(liveTimeMs)}</Badge>
         <Badge variant="outline" className="h-5 text-[10px]">{metrics.humans} humans</Badge>
+        <Badge variant="outline" className={readiness.ready ? "h-5 text-[10px]" : "h-5 border-red-500/40 bg-red-500/10 text-[10px] text-red-200"}>{readiness.ready ? "ready" : "blocked"}</Badge>
         <Badge variant="outline" className="h-5 text-[10px]">{metrics.groups} groups</Badge>
       </footer>
 
@@ -604,7 +676,7 @@ function buildInspector(world, scenario, point, selectedHumanId, events = [], li
     : null;
   const selectedController = selectedGroup?.controller ?? null;
   const recentMemories = selectedHuman
-    ? events.filter((e) => e.actor_id === selectedHuman.id || e.target_agent_id === selectedHuman.id).slice(-6).reverse().map((e) => `Beat ${e.tick}: ${e.description}`)
+    ? events.filter((e) => e.actor_id === selectedHuman.id || e.target_agent_id === selectedHuman.id).slice(-6).reverse().map((e) => `Step ${e.tick}: ${e.description}`)
     : [];
   return {
     tile,
@@ -643,13 +715,53 @@ function mergeHumanFrame(human, liveFrame) {
   }
   return {
     ...human,
-    x: frameHuman.x ?? human.x,
-    y: frameHuman.y ?? human.y,
+    id: human.id,
+    x: frameHuman?.x ?? human.x,
+    y: frameHuman?.y ?? human.y,
+    health: frameHuman?.health ?? human.health,
+    task_state: frameHuman?.state ?? human.task_state,
+    inventory: {
+      food: frameHuman?.food ?? human.inventory?.food ?? 0,
+      wood: frameHuman?.wood ?? human.inventory?.wood ?? 0,
+      stone: frameHuman?.stone ?? human.inventory?.stone ?? 0
+    },
     render_x: frameHuman.render_x ?? human.render_x ?? human.x,
     render_y: frameHuman.render_y ?? human.render_y ?? human.y,
-    task_state: frameHuman.state ?? human.task_state,
-    task_progress: frameHuman.task_progress ?? human.task_progress,
     interaction_target_id: frameHuman.target_human_id ?? human.interaction_target_id,
     speaking: frameHuman.speaking ?? false
   };
+}
+
+function groupLabel(scenario, factionId) {
+  if (!factionId) return "neutral";
+  return scenario?.factions?.find((f) => f.id === factionId)?.name ?? factionId;
+}
+
+function ThoughtStream({ human, group, isLocked, onToggleLock }) {
+  if (!human) return null;
+  return (
+    <div className="absolute top-4 right-4 z-30 w-80 rounded-2xl border border-white/20 bg-black/40 p-4 shadow-2xl backdrop-blur-xl backdrop-saturate-180">
+      <div className="mb-2 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Badge className="bg-white/10 text-white hover:bg-white/20">{human.name}</Badge>
+          <span className="text-[10px] capitalize text-zinc-400">{group}</span>
+        </div>
+        <Button size="sm" variant={isLocked ? "default" : "outline"} className="h-6 text-[10px]" onClick={onToggleLock}>
+          {isLocked ? "Following" : "Follow"}
+        </Button>
+      </div>
+      
+      <div className="mb-3 space-y-1">
+        <div className="text-[9px] uppercase tracking-widest text-zinc-500">Current Intent</div>
+        <div className="text-xs leading-snug text-zinc-200">{human.current_intent || human.last_intent?.reason || "Idle."}</div>
+      </div>
+
+      <div className="space-y-1 rounded-xl bg-white/5 p-3">
+         <div className="text-[9px] uppercase tracking-widest text-amber-500/80 drop-shadow-md">AI Thought Stream</div>
+         <div className="font-serif text-sm px-1 py-1 italic leading-relaxed text-amber-100/90 [text-shadow:0_1px_5px_rgb(255_255_255/20%)]">
+           "{human.last_thought || "Processing environment..."}"
+         </div>
+      </div>
+    </div>
+  );
 }

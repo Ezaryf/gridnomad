@@ -3,6 +3,7 @@
 import { KeyRound, Plus, Settings2, UserRoundCog } from "lucide-react";
 
 import {
+  controllerReadiness,
   PROVIDER_OPTIONS,
   providerDisplayName,
   providerSupportsBaseUrl,
@@ -131,7 +132,7 @@ export default function CivilizationSettingsSheet({
               <div className="mb-4 flex items-center justify-between gap-3">
                 <div>
                   <h3 className="text-base font-semibold text-zinc-100">Human groups</h3>
-                  <p className="text-sm text-zinc-400">Each group is a community. Every human inside it inherits the same AI controller.</p>
+                  <p className="text-sm text-zinc-400">Each group is a community. Every human inside it inherits the same AI controller. Strict AI-only mode is designed for up to 8 humans total.</p>
                 </div>
                 <Button variant="secondary" onClick={onAddGroup}>
                   <Plus className="size-4" />
@@ -234,6 +235,8 @@ function ControllerCard({
   const provider = controller?.provider ?? "heuristic";
   const models = catalog?.models?.length ? catalog.models : controller?.availableModels ?? [];
   const healthState = catalog?.health_state ?? catalog?.auth_status ?? "local";
+  const needsOpencodeLogin = provider === "opencode" && (healthState === "login_required" || healthState === "connected_no_models");
+  const readiness = controllerReadiness(controller, catalog);
 
   return (
     <div className="space-y-4">
@@ -244,11 +247,16 @@ function ControllerCard({
         </div>
         <div className="flex flex-col items-end gap-1">
           <Badge variant="muted">{providerDisplayName(provider)}</Badge>
+          <Badge variant="default" className={readiness.state === "ready" ? "text-[10px]" : "border-red-500/40 bg-red-500/10 text-[10px] text-red-200"}>{readiness.state}</Badge>
           {provider === "opencode" ? <Badge variant="outline" className="text-[10px]">{healthState}</Badge> : null}
         </div>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2">
+        <div className="sm:col-span-2 rounded-xl border border-white/10 bg-white/[0.03] p-3 text-xs leading-5 text-zinc-400">
+          <p className="font-medium text-zinc-200">Strict readiness: {readiness.state}</p>
+          <p>{readiness.message}</p>
+        </div>
         <LabeledField label="Provider">
           <Select value={provider} onValueChange={onProviderChange}>
             <SelectTrigger><SelectValue /></SelectTrigger>
@@ -277,7 +285,10 @@ function ControllerCard({
             <div className="sm:col-span-2 rounded-xl border border-white/10 bg-white/[0.03] p-3 text-xs leading-5 text-zinc-400">
               <p className="font-medium text-zinc-200">OpenCode health: {healthState}</p>
               <p>{catalog?.login_hint ?? "Check the CLI health, then login and refresh models."}</p>
+              {catalog?.environment_source ? <p className="mt-1 text-zinc-500">Environment: {catalog.environment_source === "project-local" ? "Project-local GridNomad OpenCode home" : "User-global OpenCode home"}</p> : null}
               {catalog?.detected_cli_home ? <p className="mt-1 text-zinc-500">CLI home: {catalog.detected_cli_home}</p> : null}
+              {needsOpencodeLogin ? <p className="mt-1 text-amber-300">Login is still required before this group can actually run on OpenCode, even if the CLI already exposes model names below.</p> : null}
+              {catalog?.global_stderr ? <p className="mt-1 text-amber-300">GridNomad detected a broken global OpenCode setup and switched to a project-local OpenCode home automatically.</p> : null}
             </div>
             <LabeledField label="OpenCode credential">
               <Select value={controller?.opencodeProvider || "__empty__"} onValueChange={(value) => onCredentialChange(value === "__empty__" ? "" : value)}>
@@ -296,7 +307,7 @@ function ControllerCard({
               </Button>
               <Button variant="outline" onClick={() => onLaunchProviderLogin("opencode")}>
                 <KeyRound className="size-4" />
-                Login
+                Login in terminal/browser
               </Button>
               <Button variant="outline" onClick={onRefreshOpencodeStatus}>Refresh credentials</Button>
               <Button variant="outline" onClick={() => onRefreshProviderCatalog("opencode", controller?.opencodeProvider ?? "")}>Refresh models</Button>

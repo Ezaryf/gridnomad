@@ -114,7 +114,7 @@ export default function InspectorTabs({
                 {events.slice(-30).reverse().map((event, i) => (
                   <article key={`${event.tick}-${i}`} className="rounded-xl border border-white/20 bg-white/10 p-3 backdrop-blur-[10px] backdrop-saturate-180">
                     <div className="mb-1.5 flex items-center justify-between gap-2 text-[9px] uppercase tracking-[0.18em] text-zinc-500">
-                      <span>Beat {event.tick}</span>
+                      <span>Step {event.tick}</span>
                       <span>{event.kind}</span>
                     </div>
                     <p className="text-xs leading-5 text-zinc-300">{event.description}</p>
@@ -238,7 +238,7 @@ function CommsSection({ title, messages, scenario }) {
         messages.slice(-12).reverse().map((msg, i) => (
           <article key={`${msg.tick}-${msg.sender_agent_id}-${i}`} className="rounded-xl border border-white/20 bg-white/10 p-3 backdrop-blur-[10px] backdrop-saturate-180">
             <div className="mb-1.5 flex items-center justify-between gap-2 text-[9px] uppercase tracking-[0.18em] text-zinc-500">
-              <span>Beat {msg.tick}</span>
+              <span>Step {msg.tick}</span>
               <span>{msg.scope}</span>
             </div>
             <p className="text-xs leading-5 text-zinc-300">
