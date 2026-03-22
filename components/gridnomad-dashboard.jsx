@@ -327,7 +327,7 @@ export default function GridNomadDashboard() {
     <div className="flex h-dvh w-dvw flex-col overflow-hidden bg-black text-zinc-100">
 
       {/* ── TOOLBAR ── */}
-      <header className="flex shrink-0 items-center gap-2 border-b border-white/8 bg-black/90 px-3 py-1.5 backdrop-blur-md">
+      <header className="flex h-12 items-center justify-between border-b border-white/20 bg-black/40 px-4 backdrop-blur-[10px] backdrop-saturate-180">
         <Button variant="ghost" size="icon" className="size-8" onClick={() => setLeftOpen((o) => !o)} title="Toggle groups panel">
           <PanelLeft className="size-4" />
         </Button>
@@ -391,8 +391,8 @@ export default function GridNomadDashboard() {
 
         {/* LEFT SIDEBAR — Groups */}
         {leftOpen && (
-          <aside className="flex w-[300px] shrink-0 flex-col border-r border-white/8 bg-[rgba(4,4,4,0.96)]">
-            <div className="flex items-center justify-between border-b border-white/8 px-3 py-2">
+          <aside className="flex w-[300px] shrink-0 flex-col border-r border-white/20 bg-[rgba(4,4,4,0.96)]">
+            <div className="flex items-center justify-between border-b border-white/20 px-3 py-2">
               <span className="text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-400">Groups</span>
               <div className="flex items-center gap-1">
                 <Button variant="ghost" size="icon" className="size-7" onClick={addHumanGroup} disabled={busy} title="Add group"><Plus className="size-3.5" /></Button>
@@ -402,7 +402,7 @@ export default function GridNomadDashboard() {
             <ScrollArea className="min-h-0 flex-1">
               <div className="space-y-2 p-2">
                 {groups.map((group) => (
-                  <article key={group.id} className="rounded-2xl border border-white/8 bg-white/2.5 p-3">
+                  <article key={group.id} className="rounded-2xl border border-white/20 bg-white/10 p-3 backdrop-blur-[10px] backdrop-saturate-180">
                     <div className="mb-2 flex items-center gap-2">
                       <div className="size-7 shrink-0 rounded-lg border border-white/10" style={{ backgroundColor: group.color }} />
                       <Input className="h-7 flex-1 text-xs font-medium" value={group.name} onChange={(e) => patchGroup(group.id, { name: e.target.value })} />
@@ -451,7 +451,7 @@ export default function GridNomadDashboard() {
 
         {/* RIGHT SIDEBAR — Inspector + Console */}
         {rightOpen && (
-          <aside className="flex w-[340px] shrink-0 flex-col border-l border-white/8 bg-[rgba(4,4,4,0.96)]">
+          <aside className="flex w-[340px] shrink-0 flex-col border-l border-white/20 bg-[rgba(4,4,4,0.96)]">
             <div className="min-h-0 flex-1">
               <InspectorTabs
                 scenario={scenario}
@@ -462,7 +462,7 @@ export default function GridNomadDashboard() {
                 panelHeightClass="flex-1 min-h-0"
               />
             </div>
-            <div className="h-[220px] shrink-0 border-t border-white/8">
+            <div className="h-[220px] shrink-0 border-t border-white/20">
               <SimulationConsole
                 events={events}
                 statusItems={statusItems}
@@ -476,7 +476,7 @@ export default function GridNomadDashboard() {
       </div>
 
       {/* ── STATUS BAR ── */}
-      <footer className="flex shrink-0 items-center gap-3 border-t border-white/8 bg-black/90 px-3 py-1 backdrop-blur-md">
+      <footer className="flex h-8 items-center justify-between border-t border-white/20 bg-black/40 px-4 text-[10px] backdrop-blur-[10px] backdrop-saturate-180">
         <Badge variant={running ? "default" : "outline"} className="h-5 text-[10px]">
           {running ? "● Streaming" : "Standing by"}
         </Badge>

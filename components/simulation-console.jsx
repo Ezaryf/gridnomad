@@ -41,7 +41,7 @@ export default function SimulationConsole({
             ) : (
               <div className="space-y-1.5">
                 {events.slice(-32).reverse().map((event, i) => (
-                  <article key={`${event.tick}-${i}`} className="rounded-lg border border-white/6 bg-white/2 p-2">
+                  <article key={`${event.tick}-${i}`} className="rounded-lg border border-white/20 bg-white/10 p-2 backdrop-blur-[10px] backdrop-saturate-180">
                     <div className="mb-1 flex items-center justify-between gap-2 text-[8px] uppercase tracking-[0.18em] text-zinc-500">
                       <span>Tick {event.tick}</span>
                       <span>{event.kind}</span>
@@ -61,7 +61,7 @@ export default function SimulationConsole({
             ) : (
               <div className="space-y-1.5">
                 {statusItems.slice(-24).reverse().map((item, i) => (
-                  <article key={`${item.tick ?? "s"}-${i}`} className="rounded-lg border border-white/6 bg-white/2 p-2">
+                  <article key={`${item.tick ?? "s"}-${i}`} className="rounded-lg border border-white/20 bg-white/10 p-2 backdrop-blur-[10px] backdrop-saturate-180">
                     <div className="mb-1 flex items-center justify-between gap-2 text-[8px] uppercase tracking-[0.18em] text-zinc-500">
                       <span>{item.type}</span>
                       <span>{item.tick != null ? `Tick ${item.tick}` : "Sys"}</span>
@@ -101,7 +101,7 @@ export default function SimulationConsole({
 
 function Empty({ text }) {
   return (
-    <div className="rounded-lg border border-white/6 bg-white/2 p-3 text-[11px] leading-5 text-zinc-500">
+    <div className="rounded-lg border border-white/20 bg-white/10 p-3 text-[11px] leading-5 text-zinc-400 backdrop-blur-[10px] backdrop-saturate-180">
       {text}
     </div>
   );
