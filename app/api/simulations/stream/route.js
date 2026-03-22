@@ -145,6 +145,15 @@ async function validateStrictSimulationSetup(settings) {
       continue;
     }
     if (provider === "opencode") {
+      if (!String(controller.cliHome ?? "").trim()) {
+        return {
+          ok: false,
+          reason: "home_required",
+          message: `${group.name} must create a GridNomad-managed OpenCode home before starting a strict run.`,
+          group_id: group.id,
+          provider,
+        };
+      }
       const inspection = await inspectOpencode({
         credential: controller.opencodeProvider ?? "",
         cliHome: controller.cliHome ?? "",

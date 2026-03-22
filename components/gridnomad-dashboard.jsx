@@ -7,6 +7,7 @@ import {
   ChevronRight,
   Copy,
   Dice5,
+  Grid3x3,
   Layers,
   PanelLeft,
   PanelRight,
@@ -74,7 +75,6 @@ export default function GridNomadDashboard() {
   const [debugLines, setDebugLines] = useState([]);
   const [statusMessage, setStatusMessage] = useState("Set up groups, assign controllers, and stream.");
   const [providerCatalogs, setProviderCatalogs] = useState({});
-  const [opencodeCredentials, setOpencodeCredentials] = useState([]);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [sheetTab, setSheetTab] = useState("groups");
   const [selectedTile, setSelectedTile] = useState(null);
@@ -144,7 +144,7 @@ export default function GridNomadDashboard() {
       const normalized = normalizeSettings(payload.templateScenario, payload.settings);
       setTemplateScenario(payload.templateScenario);
       setSettings(normalized);
-      await Promise.all([refreshOpencodeStatus(true), refreshProviderCatalogs(normalized, true)]);
+      await refreshProviderCatalogs(normalized, true);
       if (payload.preview) {
         setWorld(payload.preview);
       } else {
@@ -160,26 +160,11 @@ export default function GridNomadDashboard() {
     }
   }
 
-  async function refreshOpencodeStatus(silent = false) {
-    try {
-      const response = await fetch("/api/providers/opencode/status", { cache: "no-store" });
-      const payload = await response.json();
-      setOpencodeCredentials(payload.credentials ?? []);
-      if (!silent) {
-        const detail = payload.environment_source === "project-local" ? "project-local home" : "user-global home";
-        pushStatus("provider", `OpenCode ${payload.health_state ?? "status"} · ${(payload.credentials ?? []).length} credentials · ${detail}.`);
-      }
-      if (payload.stderr) pushDebug("provider", payload.stderr);
-    } catch (error) {
-      if (!silent) pushStatus("error", "Could not refresh OpenCode credentials.");
-      pushDebug("provider", String(error));
-    }
-  }
-
-  async function refreshProviderCatalog(scope, entityId, provider, credential = "", silent = false) {
+  async function refreshProviderCatalog(scope, entityId, provider, { credential = "", cliHome = "", silent = false } = {}) {
     try {
       const params = new URLSearchParams({ provider });
       if (credential) params.set("credential", credential);
+      if (cliHome) params.set("cliHome", cliHome);
       const response = await fetch(`/api/providers/catalog?${params.toString()}`, { cache: "no-store" });
       const payload = await response.json();
       setProviderCatalogs((c) => ({ ...c, [catalogKey(scope, entityId)]: payload }));
@@ -188,20 +173,29 @@ export default function GridNomadDashboard() {
           availableModels: payload.models ?? [],
           supportsModelListing: Boolean(payload.supports_model_listing),
           supportsManualModelEntry: Boolean(payload.supports_manual_model_entry),
-          ...(provider === "opencode" ? { cliHome: payload.cli_home_root ?? "" } : { cliHome: "" })
+          ...(provider === "opencode"
+            ? {
+                cliHome: payload.resolved_cli_home ?? payload.cli_home_root ?? cliHome ?? "",
+                managedHomeId: payload.managed_home_id ?? settings.groups.find((item) => item.id === entityId)?.controller?.managedHomeId ?? "",
+              }
+            : { cliHome: "", managedHomeId: "" })
         };
         patchGroupController(entityId, controllerPatch);
       }
       if (!silent) {
         if (provider === "opencode") {
-          const homeLabel = payload.environment_source === "project-local" ? "project-local home" : "user-global home";
+          const homeLabel =
+            payload.environment_source === "managed-home"
+              ? "managed home"
+              : payload.environment_source === "custom-home"
+                ? "custom home"
+                : "user-global home";
           pushStatus("provider", `OpenCode ${payload.health_state ?? "status"} · ${payload.models?.length ?? 0} models · ${homeLabel}.`);
         } else {
           pushStatus("provider", payload.ok ? `${payload.models?.length ?? 0} models for ${providerDisplayName(provider)}.` : `Could not load models.`);
         }
       }
       if (payload.stderr) pushDebug("provider", payload.stderr);
-      if (payload.global_stderr) pushDebug("provider", payload.global_stderr);
     } catch (error) {
       if (!silent) pushStatus("error", `Could not load ${providerDisplayName(provider)} catalog.`);
       pushDebug("provider", String(error));
@@ -215,7 +209,11 @@ export default function GridNomadDashboard() {
         setProviderCatalogs((c) => ({ ...c, [catalogKey("group", group.id)]: { ok: true, provider, models: [], supports_model_listing: false, supports_manual_model_entry: false, auth_status: "local", login_hint: "Heuristic is local." } }));
         continue;
       }
-      await refreshProviderCatalog("group", group.id, provider, group.controller?.opencodeProvider ?? "", silent);
+      await refreshProviderCatalog("group", group.id, provider, {
+        credential: group.controller?.opencodeProvider ?? "",
+        cliHome: group.controller?.cliHome ?? "",
+        silent
+      });
     }
   }
 
@@ -265,6 +263,9 @@ export default function GridNomadDashboard() {
     if (!readiness.ready) {
       pushStatus("error", readiness.message);
       setStatusMessage(readiness.message);
+      setLeftOpen(true);
+      setSheetTab("groups");
+      setSheetOpen(true);
       return;
     }
     setRunning(true);
@@ -316,7 +317,15 @@ export default function GridNomadDashboard() {
     if (payload.type === "status") { setCurrentTick(payload.tick ?? 0); setLiveTimeMs(payload.time_ms ?? 0); pushStatus("status", payload.message ?? "Live step complete.", payload.tick, payload.time_ms ?? null); setStatusMessage(payload.message ?? "Live step complete."); return; }
     if (payload.type === "run_started") {
       pushStatus("run_started", `Live run: ${payload.run_duration_seconds ?? settings.world?.run_duration_seconds ?? 0}s at ${payload.playback_speed ?? settings.world?.playback_speed ?? 1}x.`, 0, 0);
-      for (const ctrl of payload.controllers ?? []) pushStatus("controller", `${ctrl.group_name ?? ctrl.faction_id}: ${providerDisplayName(ctrl.provider)}${ctrl.model ? ` (${ctrl.model})` : ""}`, 0, 0);
+      for (const ctrl of payload.controllers ?? []) {
+        const parts = [
+          `${ctrl.group_name ?? ctrl.faction_id}: ${providerDisplayName(ctrl.provider)}${ctrl.model ? ` (${ctrl.model})` : ""}`
+        ];
+        if (ctrl.credential) parts.push(`credential ${ctrl.credential}`);
+        if (ctrl.execution_mode) parts.push(ctrl.execution_mode);
+        if (ctrl.cli_home) parts.push(ctrl.cli_home);
+        pushStatus("controller", parts.join(" · "), 0, 0);
+      }
       setStatusMessage(`Streaming live run for ${payload.run_duration_seconds ?? settings.world?.run_duration_seconds ?? 0}s.`);
       return;
     }
@@ -347,6 +356,21 @@ export default function GridNomadDashboard() {
     if (!templateScenario) return;
     setSettings((c) => updateGroupController(c, templateScenario, groupId, patch));
   }
+  function patchHuman(groupId, humanId, patch) {
+    setSettings((current) => ({
+      ...current,
+      groups: (current.groups ?? []).map((group) => (
+        group.id !== groupId
+          ? group
+          : {
+              ...group,
+              humans: (group.humans ?? []).map((human) => (
+                human.id === humanId ? { ...human, ...patch } : human
+              ))
+            }
+      ))
+    }));
+  }
   function addHumanGroup() {
     if (!templateScenario) return;
     setSettings((c) => addGroup(c, templateScenario));
@@ -363,15 +387,24 @@ export default function GridNomadDashboard() {
       availableModels: [],
       supportsModelListing: false,
       supportsManualModelEntry: false,
-      ...(provider === "opencode" ? {} : { opencodeProvider: "", cliHome: "" })
+      ...(provider === "opencode" ? { executionMode: "group_batch" } : { opencodeProvider: "", cliHome: "", managedHomeId: "", executionMode: "per_human" })
     });
     const group = settings.groups.find((i) => i.id === groupId);
-    if (provider !== "heuristic") await refreshProviderCatalog("group", groupId, provider, group?.controller?.opencodeProvider ?? "");
+    if (provider !== "heuristic") {
+      await refreshProviderCatalog("group", groupId, provider, {
+        credential: group?.controller?.opencodeProvider ?? "",
+        cliHome: group?.controller?.cliHome ?? "",
+      });
+    }
   }
 
   async function handleProviderCredentialChange(groupId, credential) {
     patchGroupController(groupId, { opencodeProvider: credential });
-    await refreshProviderCatalog("group", groupId, "opencode", credential);
+    const group = settings.groups.find((item) => item.id === groupId);
+    await refreshProviderCatalog("group", groupId, "opencode", {
+      credential,
+      cliHome: group?.controller?.cliHome ?? "",
+    });
   }
 
   async function launchProviderLogin(provider) {
@@ -390,6 +423,51 @@ export default function GridNomadDashboard() {
     } catch (error) { pushStatus("error", `Could not launch ${provider} login.`); pushDebug("provider", String(error)); }
   }
 
+  async function createManagedOpencodeHome(groupId) {
+    try {
+      const group = settings.groups.find((item) => item.id === groupId);
+      const response = await fetch("/api/providers/opencode/home", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ currentCliHome: group?.controller?.cliHome ?? "" })
+      });
+      const payload = await response.json();
+      if (!response.ok || payload.ok === false) {
+        throw new Error(payload.message ?? "Could not create an OpenCode home.");
+      }
+      patchGroupController(groupId, {
+        cliHome: payload.resolved_cli_home ?? payload.cli_home_root ?? "",
+        managedHomeId: payload.managed_home_id ?? "",
+        model: "",
+        opencodeProvider: "",
+        availableModels: payload.models ?? [],
+        supportsModelListing: true,
+        supportsManualModelEntry: true,
+        executionMode: "group_batch",
+      });
+      setProviderCatalogs((current) => ({ ...current, [catalogKey("group", groupId)]: payload }));
+      pushStatus("provider", `OpenCode managed home ready for ${group?.name ?? groupId}. Run the copied login command next.`);
+      if (payload.stderr) pushDebug("provider", payload.stderr);
+      setStatusMessage("OpenCode managed home created. Copy the login command and run it in your own terminal.");
+    } catch (error) {
+      pushStatus("error", String(error));
+      pushDebug("provider", String(error));
+    }
+  }
+
+  async function copyCommand(label, commandText) {
+    if (!commandText) {
+      pushStatus("error", `${label} is unavailable right now.`);
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(commandText);
+      pushStatus("clipboard", `Copied ${label}.`);
+    } catch {
+      setStatusMessage("Clipboard unavailable.");
+    }
+  }
+
   async function copySeed() {
     try { await navigator.clipboard.writeText(String(settings.world?.seed ?? "")); pushStatus("clipboard", `Copied seed.`); } catch { setStatusMessage("Clipboard unavailable."); }
   }
@@ -401,6 +479,7 @@ export default function GridNomadDashboard() {
 
   const busy = loading || working || running;
   const groups = settings.groups ?? [];
+  const blockingGroups = readiness.groups?.filter((group) => group.state !== "ready") ?? [];
 
   /* ───────────────────────────── JSX ───────────────────────────── */
 
@@ -459,7 +538,7 @@ export default function GridNomadDashboard() {
         <div className="flex-1" />
 
         <Button size="sm" className="h-7" onClick={() => generateWorld()} disabled={busy}>Generate</Button>
-        <Button size="sm" variant="secondary" className="h-7" onClick={runSimulationLive} disabled={busy || !readiness.ready} title={readiness.ready ? "Run strict AI simulation" : readiness.message}>
+        <Button size="sm" variant="secondary" className="h-7" onClick={runSimulationLive} disabled={busy} title={readiness.ready ? "Run strict AI simulation" : readiness.message}>
           <Play className="size-3.5" />
           Run
         </Button>
@@ -477,6 +556,42 @@ export default function GridNomadDashboard() {
           <PanelRight className="size-4" />
         </Button>
       </header>
+
+      {!readiness.ready ? (
+        <div className="border-b border-amber-500/20 bg-amber-500/10 px-4 py-2">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-medium text-amber-100">Run blocked: {readiness.message}</p>
+              <p className="truncate text-xs text-amber-200/80">
+                Fix the highlighted group setup before starting the strict AI-only simulation.
+              </p>
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              className="border-amber-400/30 bg-amber-500/10 text-amber-100 hover:bg-amber-500/20"
+              onClick={() => {
+                setLeftOpen(true);
+                setSheetTab("groups");
+                setSheetOpen(true);
+              }}
+            >
+              Fix setup
+            </Button>
+          </div>
+          {blockingGroups.length ? (
+            <div className="mt-2 flex flex-wrap gap-2">
+              {blockingGroups.slice(0, 4).map((group) => (
+                <div key={group.id} className="rounded-xl border border-amber-400/20 bg-black/20 px-3 py-1.5 text-xs text-amber-100/90">
+                  <span className="font-medium">{group.name}</span>
+                  <span className="mx-1 text-amber-300/60">·</span>
+                  <span>{group.message}</span>
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
 
       {/* ── BODY ── */}
       <div className="flex min-h-0 flex-1">
@@ -515,6 +630,20 @@ export default function GridNomadDashboard() {
                         </Select>
                       </label>
                     </div>
+                    {readiness.groups?.find((entry) => entry.id === group.id)?.state !== "ready" ? (
+                      <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 px-2.5 py-2 text-[11px] leading-4 text-amber-100">
+                        <p className="font-medium">
+                          {readiness.groups.find((entry) => entry.id === group.id)?.state}
+                        </p>
+                        <p className="text-amber-200/80">
+                          {readiness.groups.find((entry) => entry.id === group.id)?.message}
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-2 text-[11px] leading-4 text-emerald-100">
+                        Ready to run with {providerDisplayName(group.controller?.provider ?? "heuristic")}.
+                      </div>
+                    )}
                   </article>
                 ))}
               </div>
@@ -538,8 +667,21 @@ export default function GridNomadDashboard() {
                 onSelectHuman={handleSelectHuman}
               />
             ) : (
-              <div className="flex h-full items-center justify-center text-sm text-zinc-500">
-                Generate a world to populate the sandbox.
+              <div className="flex h-full flex-col items-center justify-center bg-[linear-gradient(rgba(255,255,255,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.03)_1px,transparent_1px)] bg-size-[40px_40px] text-zinc-500">
+                <div className="flex flex-col items-center gap-4 rounded-xl border border-white/10 bg-black/40 p-8 backdrop-blur-md">
+                  <div className="flex size-16 items-center justify-center rounded-full border border-dashed border-white/20 bg-white/5">
+                    <Grid3x3 className="size-8 text-zinc-400" />
+                  </div>
+                  <div className="text-center">
+                    <h3 className="mb-1 text-sm font-medium text-zinc-300 tracking-wide">Environment Standing By</h3>
+                    <p className="text-[11px] leading-relaxed text-zinc-500 max-w-[240px]">
+                      Configure your civilization parameters on the left, then generate a new world map to begin.
+                    </p>
+                  </div>
+                  <Button variant="outline" className="mt-2 h-8 border-white/10 bg-white/5 text-xs hover:bg-white/10" onClick={() => generateWorld()} disabled={busy}>
+                    Generate Map Blueprint
+                  </Button>
+                </div>
               </div>
             )}
             
@@ -610,20 +752,21 @@ export default function GridNomadDashboard() {
         onTabChange={setSheetTab}
         settings={settings}
         providerCatalogs={providerCatalogs}
-        opencodeCredentials={opencodeCredentials}
         busy={busy}
         onUpdateWorld={patchWorld}
         onAddGroup={addHumanGroup}
         onDeleteGroup={deleteHumanGroup}
         onUpdateGroup={patchGroup}
+        onUpdateHuman={patchHuman}
         onUpdateGroupController={patchGroupController}
         onSaveSettings={() => saveSettings()}
         onGenerateWorld={() => generateWorld()}
-        onRefreshOpencodeStatus={() => refreshOpencodeStatus()}
         onRefreshProviderCatalog={refreshProviderCatalog}
         onProviderChange={handleProviderChange}
         onProviderCredentialChange={handleProviderCredentialChange}
         onLaunchProviderLogin={launchProviderLogin}
+        onCreateOpencodeHome={createManagedOpencodeHome}
+        onCopyCommand={copyCommand}
       />
     </div>
   );

@@ -188,6 +188,10 @@ function HumanPanel({ human, group, controller, recentMemories = [] }) {
       <Section title="Thought">{human.last_thought || "None."}</Section>
       <Section title="Speech">{human.last_speech || "None."}</Section>
       <Section title="Interaction target">{human.interaction_target_id || "None."}</Section>
+      <Section title="Persona">{human.persona_summary || "None."}</Section>
+      <Section title="Social style">{human.social_style || "None."}</Section>
+      <Section title="Resource bias">{human.resource_bias || "None."}</Section>
+      <Section title="Starting drive">{human.starting_drive || "None."}</Section>
       <Section title="Memory">{recentMemories.length ? recentMemories.join(" | ") : "None."}</Section>
 
       <Section title="Emotions">
