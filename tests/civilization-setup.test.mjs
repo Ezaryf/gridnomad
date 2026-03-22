@@ -6,6 +6,7 @@ import {
   addGroup,
   buildRuntimeControllerMap,
   controllerReadiness,
+  humanNameValidation,
   normalizeSettings,
   synthesizeScenario
 } from "../lib/civilization-setup.js";
@@ -153,6 +154,20 @@ test("addGroup appends a new default group", () => {
   const next = addGroup(normalized, BASE_SCENARIO);
   assert.equal(next.groups.length, 2);
   assert.ok(next.groups[1].id.startsWith("group-"));
+});
+
+
+test("auto-generated humans get globally unique names immediately", () => {
+  const normalized = normalizeSettings(BASE_SCENARIO, {
+    groups: [
+      { id: "group-01", name: "A", population_count: 6 },
+      { id: "group-02", name: "B", population_count: 6 }
+    ]
+  });
+
+  const names = normalized.groups.flatMap((group) => group.humans.map((human) => human.name));
+  assert.equal(new Set(names).size, names.length);
+  assert.equal(humanNameValidation(normalized).valid, true);
 });
 
 

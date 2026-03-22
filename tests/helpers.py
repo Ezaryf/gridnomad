@@ -117,8 +117,20 @@ def build_simulation(
 
 
 def water_tile() -> TileState:
-    return TileState(terrain=TileType.WATER)
+    return TileState(terrain=TileType.WATER, water_access=True)
 
 
 def farmable_tile() -> TileState:
-    return TileState(terrain=TileType.PLAIN, farmable=True)
+    return TileState(terrain=TileType.PLAIN, farmable=True, food_stock=2)
+
+
+def forest_tile() -> TileState:
+    return TileState(terrain=TileType.PLAIN, biome="forest", feature="forest", tree_cover=2, wood_stock=4)
+
+
+def stone_tile() -> TileState:
+    return TileState(terrain=TileType.PLAIN, biome="hills", stone_stock=3)
+
+
+def river_tile() -> TileState:
+    return TileState(terrain=TileType.WATER, feature="river", water_access=True)

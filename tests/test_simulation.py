@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from helpers import build_agent, build_simulation, farmable_tile, water_tile
+from helpers import build_agent, build_simulation, farmable_tile, forest_tile, river_tile, stone_tile, water_tile
 from gridnomad.ai.adapters import ScriptedLLMAdapter
 from gridnomad.core.models import CulturalInnovation, DecisionPayload, Emotions, Needs, OutboundMessage, TileType
 from gridnomad.core.perception import build_perception
@@ -50,6 +50,7 @@ class SimulationTests(unittest.TestCase):
                             self_actualization=5,
                         ),
                         thought="A shelter will make this place feel livable.",
+                        build_kind="home",
                         cultural_innovation=CulturalInnovation(
                             element="Safe Hearth",
                             description="Respect the people who make safe resting places.",
@@ -127,6 +128,7 @@ class SimulationTests(unittest.TestCase):
             updated_emotions=ada.emotions,
             updated_needs=ada.needs,
             thought="Worth checking the ground closely.",
+            gather_mode="forage_food",
         )
 
         transfer_events = simulation._apply_action(simulation.registry.resolve(transfer, simulation.world, ada), transfer)
@@ -209,6 +211,149 @@ class SimulationTests(unittest.TestCase):
         events = simulation.step()
         self.assertTrue(any(event.kind == "MOVE" and event.actor_id == "ada" for event in events))
         self.assertTrue(any(event.kind == "REST" and event.actor_id == "bo" for event in events))
+
+    def test_cut_tree_build_bridge_craft_weapon_and_attack_mutate_world(self) -> None:
+        ada = build_agent("ada", "red", 1, 1, food=2, wood=4, stone=3)
+        bo = build_agent("bo", "blue", 2, 1, food=1, wood=0, stone=0, health=4)
+        simulation = build_simulation(
+            agents=[ada, bo],
+            tile_overrides=[
+                (1, 1, forest_tile()),
+                (1, 2, river_tile()),
+                (2, 2, stone_tile()),
+            ],
+        )
+
+        cut_tree = DecisionPayload(
+            action="GATHER",
+            target_x=1,
+            target_y=1,
+            reason="Wood will help me build and craft.",
+            intent="cut the tree here into useful wood",
+            speech="I can turn this tree into lumber.",
+            updated_emotions=ada.emotions,
+            updated_needs=ada.needs,
+            thought="Wood first, then I can build.",
+            gather_mode="cut_tree",
+        )
+        bridge = DecisionPayload(
+            action="BUILD",
+            target_x=1,
+            target_y=2,
+            reason="This crossing is blocking future travel.",
+            intent="build a bridge across the river so we can cross",
+            speech="A bridge here will open the path.",
+            updated_emotions=ada.emotions,
+            updated_needs=ada.needs,
+            thought="This river is worth crossing.",
+            build_kind="bridge",
+        )
+        craft = DecisionPayload(
+            action="CRAFT",
+            target_x=1,
+            target_y=1,
+            reason="I need better protection if things turn violent.",
+            intent="craft a weapon from the materials I have",
+            speech="I should arm myself before this gets worse.",
+            updated_emotions=ada.emotions,
+            updated_needs=ada.needs,
+            thought="A weapon makes conflict less one-sided.",
+            craft_kind="weapon",
+        )
+        attack = DecisionPayload(
+            action="ATTACK",
+            target_x=2,
+            target_y=1,
+            target_agent_id="bo",
+            reason="Bo is a direct threat and I am ready to strike.",
+            intent="attack Bo before he can hurt me",
+            speech="Back off.",
+            updated_emotions=ada.emotions,
+            updated_needs=ada.needs,
+            thought="I need to end this threat now.",
+            interaction_mode="hostile",
+        )
+
+        cut_event = simulation._apply_action(simulation.registry.resolve(cut_tree, simulation.world, ada), cut_tree)[0]
+        self.assertTrue(cut_event.success)
+        self.assertGreaterEqual(ada.inventory.wood, 6)
+        self.assertEqual(simulation.world.get_tile(1, 1).tree_cover, 1)
+
+        bridge_event = simulation._apply_action(simulation.registry.resolve(bridge, simulation.world, ada), bridge)[0]
+        self.assertTrue(bridge_event.success)
+        self.assertEqual(simulation.world.get_tile(1, 2).terrain, TileType.BRIDGE)
+        self.assertEqual(simulation.world.get_tile(1, 2).structure_kind, "bridge")
+
+        craft_event = simulation._apply_action(simulation.registry.resolve(craft, simulation.world, ada), craft)[0]
+        self.assertTrue(craft_event.success)
+        self.assertEqual(ada.weapon_kind, "crafted")
+
+        attack_event = simulation._apply_action(simulation.registry.resolve(attack, simulation.world, ada), attack)[0]
+        self.assertTrue(attack_event.success)
+        self.assertFalse(simulation.world.agents["bo"].alive)
+
+    def test_pair_bond_and_reproduction_create_new_human(self) -> None:
+        ada = build_agent("ada", "red", 1, 1, food=3, wood=4, stone=2, safety=3, survival=3)
+        bo = build_agent("bo", "red", 2, 1, food=3, wood=2, stone=1, safety=3, survival=3)
+        simulation = build_simulation(agents=[ada, bo])
+
+        build_home = DecisionPayload(
+            action="BUILD",
+            target_x=1,
+            target_y=1,
+            reason="A stable home makes life safer.",
+            intent="build a home where we can settle for now",
+            speech="This spot can become a home.",
+            updated_emotions=ada.emotions,
+            updated_needs=ada.needs,
+            thought="A home changes everything.",
+            build_kind="home",
+        )
+        home_event = simulation._apply_action(simulation.registry.resolve(build_home, simulation.world, ada), build_home)[0]
+        self.assertTrue(home_event.success)
+
+        for _ in range(3):
+            interact = DecisionPayload(
+                action="INTERACT",
+                target_x=2,
+                target_y=1,
+                target_agent_id="bo",
+                reason="We should deepen trust and build a household together.",
+                intent="spend time together and grow closer",
+                speech="Let's stay close and make this place work.",
+                updated_emotions=ada.emotions,
+                updated_needs=ada.needs,
+                thought="Trust grows by staying together.",
+                interaction_mode="support",
+            )
+            event = simulation._apply_action(simulation.registry.resolve(interact, simulation.world, ada), interact)[0]
+            self.assertTrue(event.success)
+
+        self.assertEqual(ada.bonded_partner_id, "bo")
+        bo.home_structure_id = ada.home_structure_id
+
+        reproduce = DecisionPayload(
+            action="REPRODUCE",
+            target_x=2,
+            target_y=1,
+            target_agent_id="bo",
+            reason="We are stable enough to grow our household.",
+            intent="have a child together in our home",
+            speech="We can make room for one more life here.",
+            updated_emotions=ada.emotions,
+            updated_needs=ada.needs,
+            thought="This home finally feels stable enough.",
+        )
+        reproduce_event = simulation._apply_action(simulation.registry.resolve(reproduce, simulation.world, ada), reproduce)[0]
+        self.assertTrue(reproduce_event.success)
+
+        for _ in range(24):
+            simulation.step()
+
+        names = [agent.name for agent in simulation.world.agents.values()]
+        self.assertEqual(len(simulation.world.agents), 3)
+        self.assertEqual(len(set(names)), len(names))
+        self.assertTrue(any(event.kind == "BIRTH" for event in simulation.events))
 
     def test_no_survival_death_before_tick_40(self) -> None:
         ada = build_agent("ada", "red", 1, 1, health=1, survival=10)

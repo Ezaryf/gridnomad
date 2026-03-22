@@ -10,6 +10,7 @@ from gridnomad.ai.civilizations import (
     AnthropicAPIAdapter,
     CivilizationProviderConfig,
     CivilizationSettings,
+    GeminiCLIAdapter,
     GeminiAPIAdapter,
     OpenAIAPIAdapter,
     OpenCodeCLIAdapter,
@@ -176,6 +177,45 @@ class ProviderRoutingTests(unittest.TestCase):
         self.assertIn("opencode", command[0])
         self.assertEqual(set(decisions.keys()), {"ada", "bo"})
         self.assertEqual(decisions["bo"].action, "REST")
+
+    def test_gemini_cli_prefers_explicit_windows_wrapper(self) -> None:
+        agent = build_agent("ada", "red", 1, 1)
+        _, world, _ = build_world(agents=[agent])
+        perception = build_perception(world, agent, 2)
+        context = build_agent_context(
+            tick=0,
+            agent=agent,
+            world=world,
+            perception=perception,
+            recent_events=[],
+            memories=[],
+            recent_messages={"civilization": [], "diplomacy": []},
+            cultural_context="",
+        )
+        adapter = GeminiCLIAdapter(
+            CivilizationProviderConfig(provider="gemini-cli", model="gemini-2.5-flash")
+        )
+
+        class Completed:
+            returncode = 0
+            stdout = '{"action":"MOVE_EAST","target_x":2,"target_y":1,"reason":"test","intent":"step east","speech":"","updated_emotions":{"Joy":4,"Sadness":1,"Fear":1,"Anger":0,"Disgust":0,"Surprise":1},"updated_needs":{"Survival":4,"Safety":4,"Belonging":4,"Esteem":4,"Self_Actualization":4},"thought":"test"}'
+            stderr = ""
+
+        with (
+            patch("gridnomad.ai.civilizations.os.name", "nt"),
+            patch("gridnomad.ai.civilizations.shutil.which") as mocked_which,
+            patch("gridnomad.ai.civilizations.subprocess.run", return_value=Completed()) as mocked_run,
+        ):
+            mocked_which.side_effect = lambda value: {
+                "gemini.cmd": r"C:\nvm4w\nodejs\gemini.cmd",
+                "where.exe": r"C:\Windows\System32\where.exe",
+            }.get(value)
+            adapter.decide(context)
+
+        command = mocked_run.call_args.args[0]
+        self.assertTrue(command[0].lower().endswith("gemini.cmd"))
+        self.assertIn("-m", command)
+        self.assertIn("gemini-2.5-flash", command)
 
 
 if __name__ == "__main__":
