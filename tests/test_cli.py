@@ -85,6 +85,37 @@ class CLITests(unittest.TestCase):
         self.assertIn("sprite_key", payload["world"]["settlements"][0])
         self.assertIn("footprint", payload["world"]["settlements"][0])
 
+    def test_generate_world_command_accepts_request_stdin(self) -> None:
+        scenario_path = ROOT / "scenarios" / "frontier_seeded.json"
+        scenario = json.loads(scenario_path.read_text(encoding="utf-8"))
+        command = [
+            sys.executable,
+            "-m",
+            "gridnomad",
+            "generate-world",
+            "--request-stdin",
+            "--seed",
+            "45",
+            "--map-width",
+            "24",
+            "--map-height",
+            "24",
+        ]
+        result = subprocess.run(
+            command,
+            cwd=ROOT,
+            input=json.dumps({"scenario": scenario}),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["world"]["seed"], 45)
+        self.assertEqual(payload["world"]["width"], 24)
+        self.assertEqual(payload["world"]["height"], 24)
+
     def test_run_stream_emits_live_messages_and_artifacts(self) -> None:
         scenario = ROOT / "scenarios" / "river_fork.json"
         scratch_root = ROOT / ".tmp-test-artifacts"
@@ -115,11 +146,14 @@ class CLITests(unittest.TestCase):
             ]
             types = [message["type"] for message in messages]
             self.assertIn("run_started", types)
+            self.assertIn("frame", types)
             self.assertIn("snapshot", types)
             self.assertIn("status", types)
             self.assertIn("complete", types)
             run_started = next(message for message in messages if message["type"] == "run_started")
             self.assertIn("controllers", run_started)
+            first_frame = next(message for message in messages if message["type"] == "frame")
+            self.assertIn("humans", first_frame)
             self.assertTrue((run_dir / "events.jsonl").exists())
             self.assertTrue((run_dir / "snapshot-0000.json").exists())
             self.assertTrue((run_dir / "snapshot-0002.json").exists())

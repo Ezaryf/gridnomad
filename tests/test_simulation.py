@@ -132,6 +132,41 @@ class SimulationTests(unittest.TestCase):
         self.assertTrue(gather_events[0].success)
         self.assertGreaterEqual(ada.inventory.food, 1)
 
+    def test_interact_can_approach_non_adjacent_target_and_frames_interpolate(self) -> None:
+        ada = build_agent("ada", "red", 1, 1, belonging=8)
+        bo = build_agent("bo", "red", 4, 1)
+        simulation = build_simulation(agents=[ada, bo])
+
+        interact = DecisionPayload(
+            action="INTERACT",
+            target_x=4,
+            target_y=1,
+            reason="I want to reconnect with Bo.",
+            intent="walk over and talk with Bo",
+            speech="Bo, wait up.",
+            updated_emotions=ada.emotions,
+            updated_needs=ada.needs,
+            thought="I should close the distance and talk.",
+            target_agent_id="bo",
+            interaction_mode="conversation",
+        )
+
+        previous_agents = {"ada": {"x": ada.x, "y": ada.y}, "bo": {"x": bo.x, "y": bo.y}}
+        event = simulation._apply_action(simulation.registry.resolve(interact, simulation.world, ada), interact)[0]
+        simulation._prime_task(
+            simulation.world.agents["ada"],
+            simulation.registry.resolve(interact, simulation.world, simulation.world.agents["ada"]),
+            interact,
+            beat_start_ms=0,
+            beat_end_ms=simulation.config.decision_interval_ms,
+        )
+        frames = simulation.build_transition_frames(previous_agents)
+
+        self.assertTrue(event.success)
+        self.assertLessEqual(abs(simulation.world.agents["ada"].x - simulation.world.agents["bo"].x) + abs(simulation.world.agents["ada"].y - simulation.world.agents["bo"].y), 1)
+        self.assertTrue(frames)
+        self.assertLess(frames[0]["humans"][0]["render_x"], frames[-1]["humans"][0]["render_x"])
+
     def test_invalid_model_response_uses_safe_fallback(self) -> None:
         ada = build_agent("ada", "red", 1, 1, survival=8)
         adapter = ScriptedLLMAdapter({"ada": ["{not valid json"]})

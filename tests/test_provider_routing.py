@@ -55,6 +55,16 @@ class ProviderRoutingTests(unittest.TestCase):
         self.assertIsInstance(adapter._adapter_for(CivilizationProviderConfig(provider="anthropic")), AnthropicAPIAdapter)
         self.assertIsInstance(adapter._adapter_for(CivilizationProviderConfig(provider="gemini-api")), GeminiAPIAdapter)
 
+    def test_routing_adapter_cache_respects_credentials_and_base_url(self) -> None:
+        adapter = RoutingLLMAdapter(CivilizationSettings())
+        first = adapter._adapter_for(
+            CivilizationProviderConfig(provider="openai", model="gpt-5-mini", api_key="sk-one", base_url="https://a.example")
+        )
+        second = adapter._adapter_for(
+            CivilizationProviderConfig(provider="openai", model="gpt-5-mini", api_key="sk-two", base_url="https://b.example")
+        )
+        self.assertIsNot(first, second)
+
     def test_routing_adapter_records_provider_fallback_messages(self) -> None:
         agent = build_agent("ada", "red", 1, 1)
         _, world, _ = build_world(agents=[agent])
