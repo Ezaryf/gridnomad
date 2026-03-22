@@ -4,17 +4,13 @@ import { spawn } from "node:child_process";
 
 import { NextResponse } from "next/server";
 
-import { synthesizeScenario } from "@/lib/civilization-setup";
+import { buildRuntimeControllerMap, normalizeSettings, synthesizeScenario } from "@/lib/civilization-setup";
 import {
   ROOT,
-  SETTINGS_PATH,
   ensureProjectData,
   readScenario,
   readSettings,
-  worldArgsFromSettings,
-  writeRuntimeControllers,
-  writeRuntimeScenario,
-  writeSettings
+  worldArgsFromSettings
 } from "@/lib/gridnomad-store";
 
 
@@ -23,14 +19,14 @@ export const runtime = "nodejs";
 
 export async function POST(request) {
   const payload = await request.json().catch(() => ({}));
-  const ticks = Math.max(1, Number(payload.ticks ?? 10));
 
   await ensureProjectData();
-  const mergedSettings = payload.settings ? await writeSettings(payload.settings) : await readSettings();
   const baseScenario = await readScenario();
+  const mergedSettings = payload.settings ? normalizeSettings(baseScenario, payload.settings) : await readSettings();
   const synthesizedScenario = synthesizeScenario(baseScenario, mergedSettings);
-  const runtimeScenarioPath = await writeRuntimeScenario(synthesizedScenario);
-  const runtimeSettingsPath = await writeRuntimeControllers(mergedSettings);
+  const durationSeconds = Math.max(10, Number(mergedSettings.world?.run_duration_seconds ?? 80));
+  const decisionIntervalMs = Math.max(250, Number(mergedSettings.world?.decision_interval_ms ?? 2000));
+  const ticks = Math.max(1, Math.ceil((durationSeconds * 1000) / decisionIntervalMs));
   const runDir = path.join(ROOT, "runs", `web-stream-${new Date().toISOString().replace(/[:.]/g, "-")}`);
   await fs.mkdir(runDir, { recursive: true });
 
@@ -40,14 +36,11 @@ export async function POST(request) {
     "-m",
     "gridnomad",
     "run-stream",
-    "--scenario",
-    runtimeScenarioPath,
+    "--request-stdin",
     "--ticks",
     String(ticks),
     "--out",
     runDir,
-    "--settings",
-    runtimeSettingsPath,
     ...worldArgsFromSettings(mergedSettings.world)
   ];
 
@@ -65,6 +58,12 @@ export async function POST(request) {
         shell: false,
         windowsHide: true
       });
+
+      child.stdin.write(JSON.stringify({
+        scenario: synthesizedScenario,
+        settings: buildRuntimeControllerMap(mergedSettings)
+      }));
+      child.stdin.end();
 
       const enqueueObject = (message) => {
         controller.enqueue(encoder.encode(`${JSON.stringify(message)}\n`));
@@ -86,10 +85,6 @@ export async function POST(request) {
           type: "error",
           message: error.message
         });
-        await Promise.all([
-          fs.unlink(runtimeScenarioPath).catch(() => {}),
-          fs.unlink(runtimeSettingsPath).catch(() => {})
-        ]);
         controller.close();
       });
 
@@ -101,10 +96,6 @@ export async function POST(request) {
             code
           });
         }
-        await Promise.all([
-          fs.unlink(runtimeScenarioPath).catch(() => {}),
-          fs.unlink(runtimeSettingsPath).catch(() => {})
-        ]);
         controller.close();
       });
     }

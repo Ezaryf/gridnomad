@@ -8,11 +8,7 @@ import {
 } from "@/lib/civilization-setup";
 import {
   ensureProjectData,
-  getCliEnvironment,
-  parseOpencodeCredentials,
-  parseOpencodeModels,
-  runCommand,
-  stripAnsi
+  inspectOpencode
 } from "@/lib/gridnomad-store";
 
 
@@ -71,28 +67,11 @@ export async function GET(request) {
 
   if (provider === "opencode") {
     const providerFilter = url.searchParams.get("credential") ?? "";
-    const [authResult, modelsResult] = await Promise.all([
-      runCommand("opencode", ["auth", "list"], {
-        env: getCliEnvironment(),
-        timeoutMs: 20000
-      }),
-      runCommand("opencode", providerFilter ? ["models", providerFilter] : ["models"], {
-        env: getCliEnvironment(),
-        timeoutMs: 20000
-      })
-    ]);
-    const credentials = parseOpencodeCredentials(authResult.stdout);
+    const inspection = await inspectOpencode({ credential: providerFilter });
     return NextResponse.json({
-      ok: authResult.code === 0 && modelsResult.code === 0,
-      provider,
-      models: parseOpencodeModels(modelsResult.stdout),
-      credentials,
+      ...inspection,
       supports_model_listing: true,
-      supports_manual_model_entry: true,
-      auth_status: credentials.length ? "connected" : "login-required",
-      login_hint: credentials.length ? "OpenCode credentials detected." : "Launch OpenCode login to unlock provider models.",
-      stdout: stripAnsi(modelsResult.stdout),
-      stderr: stripAnsi(modelsResult.stderr || authResult.stderr)
+      supports_manual_model_entry: true
     });
   }
 
