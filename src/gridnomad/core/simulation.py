@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from gridnomad.ai.adapters import AgentContext, LLMAdapter, build_agent_context, parse_decision_payload
+from gridnomad.ai.civilizations import ProviderDecisionError
 from gridnomad.core.actions import ActionRegistry, MODEL_ACTIONS, MOVE_DELTAS
 from gridnomad.core.culture import CultureStore
 from gridnomad.core.memory import MemoryStore
@@ -38,6 +39,19 @@ class AgentDecisionFrame:
     agent: AgentState
     perception: object
     decision: DecisionPayload
+
+
+@dataclass(slots=True)
+class SimulationAbortError(RuntimeError):
+    message: str
+    actor_id: str | None = None
+    faction_id: str | None = None
+    provider: str | None = None
+    model: str | None = None
+    reason: str = "simulation_error"
+
+    def __str__(self) -> str:
+        return self.message
 
 
 class Simulation:
@@ -72,8 +86,7 @@ class Simulation:
 
     def step(self) -> list[SimulationEvent]:
         self.world.tick += 1
-        beat_start_ms = max(0, (self.world.tick - 1) * self.config.decision_interval_ms)
-        beat_end_ms = self.world.tick * self.config.decision_interval_ms
+        step_time_ms = self.current_time_ms
         tick_events: list[SimulationEvent] = []
         tick_events.extend(self._world_decay_update())
 
@@ -96,7 +109,7 @@ class Simulation:
                 agent.last_intent = decision.to_intent()
 
             action = self.registry.resolve(decision, self.world, agent)
-            self._prime_task(agent, action, decision, beat_start_ms=beat_start_ms, beat_end_ms=beat_end_ms)
+            self._prime_task(agent, action, decision, step_time_ms=step_time_ms)
 
             tick_events.append(
                 self._event(
@@ -175,6 +188,10 @@ class Simulation:
         self.events.extend(tick_events)
         return tick_events
 
+    @property
+    def current_time_ms(self) -> int:
+        return self.world.tick * self.config.microstep_interval_ms
+
     def _collect_decisions(self) -> list[AgentDecisionFrame]:
         active_agents = [agent for agent in sorted(self.world.agents.values(), key=lambda item: item.id) if agent.alive]
         if not active_agents:
@@ -207,14 +224,46 @@ class Simulation:
 
     def _resolve_decision_input(self, item: tuple[AgentState, object, AgentContext]) -> AgentDecisionFrame:
         agent, perception, context = item
-        raw = self.adapter.decide(context)
+        try:
+            raw = self.adapter.decide(context)
+        except ProviderDecisionError as exc:
+            raise SimulationAbortError(
+                message=f"{agent.name} could not get a decision from {exc.provider}: {exc.message}",
+                actor_id=agent.id,
+                faction_id=agent.faction_id,
+                provider=exc.provider,
+                model=exc.model,
+                reason="provider_failure",
+            ) from exc
         try:
             decision = parse_decision_payload(raw)
-        except (ValueError, KeyError, TypeError, json.JSONDecodeError):
-            decision = self._safe_fallback_decision(agent, reason="Invalid model response; using fallback.")
+        except (ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
+            raise SimulationAbortError(
+                message=f"{agent.name} returned invalid decision JSON: {exc}",
+                actor_id=agent.id,
+                faction_id=agent.faction_id,
+                reason="invalid_model_response",
+            ) from exc
+        self._validate_decision(agent, decision)
         decision.updated_emotions = Emotions.from_dict(decision.updated_emotions.to_dict(), clamp=True)
         decision.updated_needs = Needs.from_dict(decision.updated_needs.to_dict(), clamp=True)
         return AgentDecisionFrame(agent=agent, perception=perception, decision=decision)
+
+    def _validate_decision(self, agent: AgentState, decision: DecisionPayload) -> None:
+        if decision.action not in MODEL_ACTIONS:
+            raise SimulationAbortError(
+                message=f"{agent.name} proposed unsupported action {decision.action!r}.",
+                actor_id=agent.id,
+                faction_id=agent.faction_id,
+                reason="unsupported_action",
+            )
+        if decision.action == "MOVE":
+            raise SimulationAbortError(
+                message=f"{agent.name} used generic MOVE. Strict mode requires explicit cardinal movement.",
+                actor_id=agent.id,
+                faction_id=agent.faction_id,
+                reason="generic_move_forbidden",
+            )
 
     def snapshot(self) -> dict[str, object]:
         return {
@@ -230,45 +279,33 @@ class Simulation:
         *,
         frame_index_start: int = 0,
     ) -> list[dict[str, object]]:
-        frame_count = max(1, round(self.config.decision_interval_ms / self.config.microstep_interval_ms))
-        beat_start_ms = max(0, (self.world.tick - 1) * self.config.decision_interval_ms)
-        frames: list[dict[str, object]] = []
-        for frame_number in range(1, frame_count + 1):
-            progress = frame_number / frame_count
-            time_ms = beat_start_ms + min(frame_number * self.config.microstep_interval_ms, self.config.decision_interval_ms)
-            humans: list[dict[str, object]] = []
-            for agent in sorted(self.world.agents.values(), key=lambda item: item.id):
-                start = previous_agents.get(agent.id, {})
-                start_x = float(start.get("x", agent.x))
-                start_y = float(start.get("y", agent.y))
-                render_x = start_x + ((agent.x - start_x) * progress)
-                render_y = start_y + ((agent.y - start_y) * progress)
-                humans.append(
-                    {
-                        "id": agent.id,
-                        "x": agent.x,
-                        "y": agent.y,
-                        "render_x": render_x,
-                        "render_y": render_y,
-                        "state": agent.task_state,
-                        "task_progress": min(100, max(0, round(progress * 100))),
-                        "target_human_id": agent.interaction_target_id,
-                        "target_tile": None
-                        if agent.task_target_x is None or agent.task_target_y is None
-                        else {"x": agent.task_target_x, "y": agent.task_target_y},
-                        "speaking": bool(agent.last_speech and time_ms <= agent.speaking_until_ms),
-                        "alive": agent.alive,
-                    }
-                )
-            frames.append(
+        humans: list[dict[str, object]] = []
+        for agent in sorted(self.world.agents.values(), key=lambda item: item.id):
+            humans.append(
                 {
-                    "time_ms": time_ms,
-                    "frame_index": frame_index_start + frame_number,
-                    "decision_beat": self.world.tick,
-                    "humans": humans,
+                    "id": agent.id,
+                    "x": agent.x,
+                    "y": agent.y,
+                    "render_x": float(agent.x),
+                    "render_y": float(agent.y),
+                    "state": agent.task_state,
+                    "task_progress": agent.task_progress,
+                    "target_human_id": agent.interaction_target_id,
+                    "target_tile": None
+                    if agent.task_target_x is None or agent.task_target_y is None
+                    else {"x": agent.task_target_x, "y": agent.task_target_y},
+                    "speaking": bool(agent.last_speech and self.current_time_ms <= agent.speaking_until_ms),
+                    "alive": agent.alive,
                 }
             )
-        return frames
+        return [
+            {
+                "time_ms": self.current_time_ms,
+                "frame_index": frame_index_start + 1,
+                "decision_beat": self.world.tick,
+                "humans": humans,
+            }
+        ]
 
     def evaluate_salience(
         self,
@@ -373,43 +410,36 @@ class Simulation:
         return f"{sender_name} to {target}: {message.text}"
 
     def _safe_fallback_decision(self, agent: AgentState, *, reason: str) -> DecisionPayload:
-        for action_name, (dx, dy) in sorted(MOVE_DELTAS.items()):
-            nx = agent.x + dx
-            ny = agent.y + dy
-            if not self.world.in_bounds(nx, ny):
-                continue
-            tile = self.world.get_tile(nx, ny)
-            if tile.passable and not self.world.position_occupied(nx, ny, exclude_agent_id=agent.id):
-                dominant, intensity = agent.emotions.dominant()
-                return DecisionPayload(
-                    action=action_name,
-                    target_x=nx,
-                    target_y=ny,
-                    reason=reason,
-                    intent="move to a nearby safe tile and keep going",
-                    speech="",
-                    updated_emotions=agent.emotions,
-                    updated_needs=agent.needs,
-                    thought=f"{dominant} at {intensity}: {reason}",
-                    interaction_mode="avoid",
-                )
-        dominant, intensity = agent.emotions.dominant()
-        return DecisionPayload(
-            action="REST",
-            target_x=agent.x,
-            target_y=agent.y,
-            reason=reason,
-            intent="hold position and recover while waiting for a safer option",
-            speech="",
-            updated_emotions=agent.emotions,
-            updated_needs=agent.needs,
-            thought=f"{dominant} at {intensity}: Holding position because no safe tile is open.",
-            interaction_mode="recover",
+        raise SimulationAbortError(
+            message=f"{agent.name} has no fallback decision in strict mode: {reason}",
+            actor_id=agent.id,
+            faction_id=agent.faction_id,
+            reason="fallback_forbidden",
         )
 
     def _world_decay_update(self) -> list[SimulationEvent]:
         events: list[SimulationEvent] = []
-        current_time_ms = self.world.tick * self.config.decision_interval_ms
+        current_time_ms = self.current_time_ms
+        survival_interval = max(1, round(12000 / self.config.microstep_interval_ms))
+        belonging_interval = max(1, round(15000 / self.config.microstep_interval_ms))
+        self_actualization_interval = max(1, round(16000 / self.config.microstep_interval_ms))
+        safety_interval = max(1, round(14000 / self.config.microstep_interval_ms))
+        time_of_day_interval = max(1, round(15000 / self.config.microstep_interval_ms))
+        weather_interval = max(1, round(30000 / self.config.microstep_interval_ms))
+
+        if self.world.tick % time_of_day_interval == 0:
+            self.world.time_of_day = (self.world.time_of_day + 1) % 24
+        if self.world.tick % weather_interval == 0 and self.rng.random() < 0.05:
+            roll = self.rng.random()
+            if roll < 0.60:
+                self.world.weather = "clear"
+            elif roll < 0.85:
+                self.world.weather = "rain"
+            elif roll < 0.95:
+                self.world.weather = "snow"
+            else:
+                self.world.weather = "storm"
+
         for agent in sorted(self.world.agents.values(), key=lambda item: item.id):
             if not agent.alive:
                 continue
@@ -421,17 +451,17 @@ class Simulation:
             agent.task_target_y = None
             agent.interaction_target_id = None
 
-            if self.world.tick % 12 == 0:
+            if self.world.tick % survival_interval == 0:
                 agent.needs.survival = min(10, agent.needs.survival + 1)
-            if self.world.tick % 15 == 0:
+            if self.world.tick % belonging_interval == 0:
                 agent.needs.belonging = min(10, agent.needs.belonging + 1)
-            if self.world.tick % 16 == 0:
+            if self.world.tick % self_actualization_interval == 0:
                 agent.needs.self_actualization = min(10, agent.needs.self_actualization + 1)
 
             current_tile = self.world.get_tile(agent.x, agent.y)
             if current_tile.terrain == TileType.HOUSE:
                 agent.needs.safety = max(0, agent.needs.safety - 1)
-            elif self.world.tick % 14 == 0:
+            elif self.world.tick % safety_interval == 0:
                 agent.needs.safety = min(10, agent.needs.safety + 1)
 
             if agent.needs.survival >= 10:
@@ -439,7 +469,7 @@ class Simulation:
             else:
                 agent.critical_survival_ticks = max(0, agent.critical_survival_ticks - 1)
 
-            if current_time_ms < 90000 or agent.critical_survival_ticks < 8:
+            if current_time_ms < 90000 or agent.critical_survival_ticks < 48:
                 continue
 
             agent.health = max(0, agent.health - 1)
@@ -511,7 +541,10 @@ class Simulation:
         return self._event("CONSUME", f"{actor.name} ate food and stabilized.", True, actor.id, faction_id=actor.faction_id, metadata={"intent": decision.intent})
 
     def _apply_gather(self, actor: AgentState, action: EngineAction, decision: DecisionPayload) -> SimulationEvent:
-        tile = self._target_or_current_tile(actor, action)
+        if action.target_x is not None and action.target_y is not None and (action.target_x != actor.x or action.target_y != actor.y):
+            actor.last_action_success = False
+            return self._event("GATHER", f"{actor.name} must stand on the target tile before gathering.", False, actor.id, faction_id=actor.faction_id)
+        tile = self.world.get_tile(actor.x, actor.y)
         inventory = actor.inventory
         gathered = None
         amount = 1
@@ -534,7 +567,10 @@ class Simulation:
         return self._event("GATHER", f"{actor.name} gathered {gathered}.", True, actor.id, faction_id=actor.faction_id, metadata={"resource": gathered, "intent": decision.intent})
 
     def _apply_build(self, actor: AgentState, action: EngineAction, decision: DecisionPayload) -> SimulationEvent:
-        tile = self._target_or_current_tile(actor, action)
+        if action.target_x is not None and action.target_y is not None and (action.target_x != actor.x or action.target_y != actor.y):
+            actor.last_action_success = False
+            return self._event("BUILD", f"{actor.name} must stand on the target tile before building.", False, actor.id, faction_id=actor.faction_id)
+        tile = self.world.get_tile(actor.x, actor.y)
         if actor.inventory.wood < 2 or actor.inventory.stone < 1 or not tile.buildable:
             actor.last_action_success = False
             return self._event("BUILD", f"{actor.name} could not build anything useful here.", False, actor.id, faction_id=actor.faction_id)
@@ -552,9 +588,9 @@ class Simulation:
         if target is None or not target.alive:
             actor.last_action_success = False
             return self._event("INTERACT", f"{actor.name} could not find anyone close enough to interact with.", False, actor.id, faction_id=actor.faction_id)
-        if abs(target.x - actor.x) + abs(target.y - actor.y) > 1 and not self._approach_target(actor, target):
+        if abs(target.x - actor.x) + abs(target.y - actor.y) > 1:
             actor.last_action_success = False
-            return self._event("INTERACT", f"{actor.name} could not get close enough to {target.name}.", False, actor.id, faction_id=actor.faction_id)
+            return self._event("INTERACT", f"{actor.name} is too far from {target.name} and needs another model decision to close the distance.", False, actor.id, faction_id=actor.faction_id)
         actor.needs.belonging = max(0, actor.needs.belonging - 2)
         actor.needs.safety = max(0, actor.needs.safety - 1)
         target.needs.belonging = max(0, target.needs.belonging - 2)
@@ -567,9 +603,9 @@ class Simulation:
         if target is None or not target.alive:
             actor.last_action_success = False
             return self._event("TRANSFER", f"{actor.name} had no nearby person to share with.", False, actor.id, faction_id=actor.faction_id)
-        if abs(target.x - actor.x) + abs(target.y - actor.y) > 1 and not self._approach_target(actor, target):
+        if abs(target.x - actor.x) + abs(target.y - actor.y) > 1:
             actor.last_action_success = False
-            return self._event("TRANSFER", f"{actor.name} could not reach {target.name} to share anything.", False, actor.id, faction_id=actor.faction_id)
+            return self._event("TRANSFER", f"{actor.name} is too far from {target.name} to share anything.", False, actor.id, faction_id=actor.faction_id)
         resource, amount = actor.inventory.most_abundant()
         if amount <= 0:
             actor.last_action_success = False
@@ -583,21 +619,15 @@ class Simulation:
 
     def _apply_communicate(self, actor: AgentState, action: EngineAction, decision: DecisionPayload) -> SimulationEvent:
         target = None if action.target_agent_id is None else self.world.agents.get(action.target_agent_id)
-        if target is not None and target.alive and abs(target.x - actor.x) + abs(target.y - actor.y) > 1:
-            self._approach_target(actor, target)
         actor.needs.belonging = max(0, actor.needs.belonging - 1)
+        if target is not None and target.alive and abs(target.x - actor.x) + abs(target.y - actor.y) > 1:
+            actor.last_action_success = False
+            return self._event("COMMUNICATE", f"{actor.name} tried to talk to {target.name} from too far away.", False, actor.id, target_agent_id=target.id, faction_id=actor.faction_id, metadata={"intent": decision.intent, "speech": decision.speech})
         actor.last_action_success = True
         if target is None or not target.alive:
             return self._event("COMMUNICATE", f"{actor.name} broadcast a message to the group.", True, actor.id, faction_id=actor.faction_id, metadata={"intent": decision.intent, "speech": decision.speech})
         target.needs.belonging = max(0, target.needs.belonging - 1)
         return self._event("COMMUNICATE", f"{actor.name} communicated with {target.name}.", True, actor.id, target_agent_id=target.id, faction_id=actor.faction_id, metadata={"intent": decision.intent, "speech": decision.speech})
-
-    def _target_or_current_tile(self, actor: AgentState, action: EngineAction) -> TileState:
-        target_x = actor.x if action.target_x is None else action.target_x
-        target_y = actor.y if action.target_y is None else action.target_y
-        if not self.world.in_bounds(target_x, target_y):
-            target_x, target_y = actor.x, actor.y
-        return self.world.get_tile(target_x, target_y)
 
     def _record_event(self, event: SimulationEvent) -> None:
         if event.actor_id is not None:
@@ -624,8 +654,7 @@ class Simulation:
         action: EngineAction,
         decision: DecisionPayload,
         *,
-        beat_start_ms: int,
-        beat_end_ms: int,
+        step_time_ms: int,
     ) -> None:
         task_state = {
             "MOVE": "moving",
@@ -644,30 +673,8 @@ class Simulation:
         agent.task_target_x = action.target_x
         agent.task_target_y = action.target_y
         agent.interaction_target_id = action.target_agent_id or decision.target_agent_id
-        agent.last_decision_at_ms = beat_start_ms
-        agent.speaking_until_ms = beat_end_ms if decision.speech.strip() else 0
-
-    def _approach_target(self, actor: AgentState, target: AgentState) -> bool:
-        if abs(target.x - actor.x) + abs(target.y - actor.y) <= 1:
-            return True
-        candidates: list[tuple[int, int, int]] = []
-        for dx, dy in MOVE_DELTAS.values():
-            nx = target.x + dx
-            ny = target.y + dy
-            if not self.world.in_bounds(nx, ny):
-                continue
-            if not self.world.get_tile(nx, ny).passable:
-                continue
-            if self.world.position_occupied(nx, ny, exclude_agent_id=actor.id) and (nx, ny) != (actor.x, actor.y):
-                continue
-            distance = abs(nx - actor.x) + abs(ny - actor.y)
-            candidates.append((distance, nx, ny))
-        if not candidates:
-            return False
-        _, nx, ny = min(candidates, key=lambda item: (item[0], item[2], item[1]))
-        actor.x = nx
-        actor.y = ny
-        return abs(target.x - actor.x) + abs(target.y - actor.y) <= 1
+        agent.last_decision_at_ms = step_time_ms
+        agent.speaking_until_ms = step_time_ms + self.config.microstep_interval_ms if decision.speech.strip() else 0
 
     def _event(
         self,

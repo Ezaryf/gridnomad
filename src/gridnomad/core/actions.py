@@ -13,7 +13,6 @@ MOVE_DELTAS = {
 }
 
 PRIMITIVE_ACTIONS = {
-    "MOVE",
     "REST",
     "INTERACT",
     "CONSUME",
@@ -56,10 +55,6 @@ class ActionRegistry:
                 },
             )
 
-        if action == "MOVE":
-            target_x, target_y = self._resolve_target_tile(decision, world_state, actor)
-            return EngineAction(kind="MOVE", actor_id=actor.id, target_x=target_x, target_y=target_y)
-
         if action in {"INTERACT", "TRANSFER", "COMMUNICATE"}:
             target_agent = self._resolve_target_agent(decision, world_state, actor)
             return EngineAction(
@@ -81,17 +76,7 @@ class ActionRegistry:
     ) -> tuple[int | None, int | None]:
         if decision.target_x is not None and decision.target_y is not None:
             return decision.target_x, decision.target_y
-        candidates = [
-            (actor.x, actor.y),
-            (actor.x, actor.y - 1),
-            (actor.x + 1, actor.y),
-            (actor.x, actor.y + 1),
-            (actor.x - 1, actor.y),
-        ]
-        for x, y in candidates:
-            if world_state.in_bounds(x, y):
-                return x, y
-        return None, None
+        return actor.x, actor.y
 
     def _resolve_target_agent(
         self,
@@ -107,10 +92,7 @@ class ActionRegistry:
             target = world_state.agent_at(decision.target_x, decision.target_y, exclude_agent_id=actor.id)
             if target is not None:
                 return target
-        nearby = world_state.nearby_agents(
-            actor.x, actor.y, self.perception_radius, exclude_agent_id=actor.id
-        )
-        return nearby[0] if nearby else None
+        return None
 
     def intent_from_decision(self, decision: DecisionPayload) -> IntentState:
         return decision.to_intent()

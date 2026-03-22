@@ -69,8 +69,11 @@ Recent group messages: {recent_messages.get("civilization", [])}
 Recent cross-group messages: {recent_messages.get("diplomacy", [])}
 Your group's culture summary: {cultural_context}
 
-## Available primitive actions:
-- MOVE
+## Available immediate next-step actions:
+- MOVE_NORTH
+- MOVE_SOUTH
+- MOVE_EAST
+- MOVE_WEST
 - REST
 - INTERACT
 - CONSUME
@@ -78,12 +81,11 @@ Your group's culture summary: {cultural_context}
 - BUILD
 - TRANSFER
 - COMMUNICATE
-- You may also use MOVE_NORTH / MOVE_SOUTH / MOVE_EAST / MOVE_WEST if you want to be specific
 
 ## Your Task:
-1. Decide what a real human like you wants to do next.
+1. Decide the next immediate step only. Do not describe a multi-step plan unless the thought or intent explains it.
 2. Return a short, human-readable intent that explains your goal.
-3. Choose one primitive action that can execute that intent in the world.
+3. Choose one immediate action that can execute that goal right now in the world.
 4. If another human matters to your plan, include their id in target_agent_id.
 5. If your plan is social, you may include interaction_mode such as conversation, support, sharing, hostile, or observe.
 6. Optionally include one short spoken line if you would naturally say something.
@@ -92,13 +94,13 @@ Your group's culture summary: {cultural_context}
 
 Output only valid JSON with this structure:
 {{
-  "action": "MOVE",
+  "action": "MOVE_EAST",
   "target_x": null,
   "target_y": null,
   "target_agent_id": null,
-  "reason": "I want to reach the riverbank before dark.",
-  "intent": "Find water and see if anyone nearby needs help carrying supplies.",
-  "speech": "I am heading for the river. Come with me if you need water.",
+  "reason": "The river is east of me and I want to get closer one step at a time.",
+  "intent": "Take one step toward the river so I can look for water and anyone who needs help.",
+  "speech": "I am stepping east toward the river.",
   "target_resource_kind": "food",
   "interaction_mode": "support",
   "desired_distance": 1,
@@ -123,9 +125,10 @@ Output only valid JSON with this structure:
 Important:
 - Keep values as integers between 0 and 10.
 - The visible part of the simulation should feel conscious and human, not scripted.
-- Use action primitives only to execute your intent; the intent should be richer than the primitive.
+- Choose the next immediate step only. You will be asked again on the next microstep.
 - Keep speech short and natural.
 - Use target_agent_id whenever you are choosing to talk to, help, follow, avoid, or confront a specific nearby human.
+- Do not output generic MOVE. Use only MOVE_NORTH, MOVE_SOUTH, MOVE_EAST, or MOVE_WEST for movement.
 - Do not invent kingdoms, races, cities, or fantasy systems. This is a group-of-humans simulator.
 
 Now respond with your JSON decision.

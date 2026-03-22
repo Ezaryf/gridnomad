@@ -24,8 +24,34 @@ def build_perception(world: WorldState, agent: AgentState, radius: int) -> Perce
     visible_resources: list[str] = []
     nearby_water: list[tuple[int, int]] = []
     nearby_farmable: list[tuple[int, int]] = []
+    adjacent_descriptions: list[str] = []
 
     common_biomes = {"grassland", "meadow", "island-grass", "orchard", "high-pasture", "vale"}
+
+    cardinal_tiles = {
+        "north": (agent.x, agent.y - 1),
+        "east": (agent.x + 1, agent.y),
+        "south": (agent.x, agent.y + 1),
+        "west": (agent.x - 1, agent.y),
+    }
+    for label, (tx, ty) in cardinal_tiles.items():
+        if not world.in_bounds(tx, ty):
+            adjacent_descriptions.append(f"{label} is out of bounds")
+            signature_parts.append(f"adjacent:{label}:out-of-bounds")
+            continue
+        tile = world.get_tile(tx, ty)
+        occupant = world.agent_at(tx, ty, exclude_agent_id=agent.id)
+        tile_status = tile.describe()
+        if not tile.passable:
+            adjacent_descriptions.append(f"{label} is blocked by {tile_status}")
+            signature_parts.append(f"adjacent:{label}:blocked:{tile_status}")
+            continue
+        if occupant is not None:
+            adjacent_descriptions.append(f"{label} is occupied by {occupant.name} [id={occupant.id}]")
+            signature_parts.append(f"adjacent:{label}:occupied:{occupant.id}")
+            continue
+        adjacent_descriptions.append(f"{label} is open {tile_status}")
+        signature_parts.append(f"adjacent:{label}:open:{tile_status}")
 
     for y in range(world.height):
         for x in range(world.width):
@@ -56,10 +82,14 @@ def build_perception(world: WorldState, agent: AgentState, radius: int) -> Perce
         else:
             hostile_agents.append(other.id)
 
+    local_status = [
+        f"Adjacent tiles: {', '.join(adjacent_descriptions)}.",
+        f"Inventory: food={agent.inventory.food}, wood={agent.inventory.wood}, stone={agent.inventory.stone}.",
+    ]
     if not points:
-        text = "Open plain terrain surrounds you. No notable agents, resources, or structures are nearby."
+        text = " ".join(local_status + ["Open plain terrain surrounds you. No notable agents, resources, or structures are nearby."])
     else:
-        text = "; ".join(sorted(points))
+        text = " ".join(local_status + ["Nearby context: " + "; ".join(sorted(points))])
     signature = "|".join(sorted(signature_parts))
     return PerceptionSnapshot(
         text=text,

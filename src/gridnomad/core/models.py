@@ -926,6 +926,8 @@ class WorldState:
     structures: dict[str, StructureState] = field(default_factory=dict)
     battles: dict[str, BattleState] = field(default_factory=dict)
     fauna_events: list[dict[str, Any]] = field(default_factory=list)
+    time_of_day: int = 8
+    weather: str = "clear"
 
     def in_bounds(self, x: int, y: int) -> bool:
         return 0 <= x < self.width and 0 <= y < self.height
@@ -998,6 +1000,8 @@ class WorldState:
             "structures": {structure_id: structure.to_dict() for structure_id, structure in sorted(self.structures.items())},
             "battles": {battle_id: battle.to_dict() for battle_id, battle in sorted(self.battles.items())},
             "fauna_events": [dict(item) for item in self.fauna_events],
+            "time_of_day": self.time_of_day,
+            "weather": self.weather,
         }
 
 

@@ -18,6 +18,22 @@ DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-5"
 DEFAULT_GEMINI_API_MODEL = "gemini-2.5-flash"
 
 
+class ProviderDecisionError(RuntimeError):
+    def __init__(
+        self,
+        *,
+        faction_id: str,
+        provider: str,
+        model: str,
+        message: str,
+    ) -> None:
+        super().__init__(message)
+        self.faction_id = faction_id
+        self.provider = provider
+        self.model = model
+        self.message = message
+
+
 def _clean_cli_output(output: str) -> str:
     text = ANSI_PATTERN.sub("", output).strip()
     if text.startswith("```"):
@@ -349,10 +365,12 @@ class RoutingLLMAdapter:
                         "message": str(exc),
                     }
                 )
-            fallback = self.heuristic.decide(agent_context)
-            fallback.reason = f"Provider fallback after {config.provider} error: {exc}"
-            fallback.thought = f"{fallback.thought} Provider fallback engaged."
-            return fallback
+            raise ProviderDecisionError(
+                faction_id=agent_context.agent.faction_id,
+                provider=config.provider,
+                model=config.model or "",
+                message=str(exc),
+            ) from exc
 
     def _adapter_for(self, config: CivilizationProviderConfig):
         cache_key = (

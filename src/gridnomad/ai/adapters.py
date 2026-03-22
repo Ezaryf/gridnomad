@@ -43,12 +43,12 @@ class HeuristicLLMAdapter:
     def decide(self, agent_context: AgentContext) -> DecisionPayload:
         agent = agent_context.agent
         perception = agent_context.perception
-        action = "MOVE"
+        action = "MOVE_NORTH"
         target_x: int | None = None
         target_y: int | None = None
         target_agent_id: str | None = None
-        reason = "I want to keep exploring and stay useful to the people near me."
-        intent = "Keep moving through the area, look for resources, and stay close enough to help others."
+        reason = "I want to take one concrete next step that keeps me useful and observant."
+        intent = "Take one careful next step through the area and keep watch for people or resources."
         speech = ""
         outbound_message: OutboundMessage | None = None
         interaction_mode: str | None = None
@@ -125,8 +125,11 @@ class HeuristicLLMAdapter:
             move_names = sorted(MOVE_DELTAS)
             index = (sum(ord(char) for char in agent.id) + agent_context.tick + self.deterministic_offset) % len(move_names)
             action = move_names[index]
-            reason = "I do not face an urgent crisis, so I want to explore and keep learning about this place."
-            intent = "Scout the nearby terrain, watch for resources, and stay mobile."
+            dx, dy = MOVE_DELTAS[action]
+            target_x = agent.x + dx
+            target_y = agent.y + dy
+            reason = "I do not face an urgent crisis, so I want to choose one immediate movement step and then reassess."
+            intent = "Scout one nearby tile, then decide again from the new position."
             if agent_context.tick % 4 == 0:
                 speech = "I am moving ahead to see what is out there."
                 outbound_message = OutboundMessage(
@@ -148,7 +151,7 @@ class HeuristicLLMAdapter:
             belonging=min(10, max(0, agent.needs.belonging - (1 if action == "INTERACT" else 0))),
             esteem=min(10, max(0, agent.needs.esteem + (1 if action in {"BUILD", "TRANSFER"} else 0))),
             self_actualization=min(
-                10, max(0, agent.needs.self_actualization + (1 if action in {"MOVE", *MOVE_DELTAS.keys()} else 0))
+                10, max(0, agent.needs.self_actualization + (1 if action in MOVE_DELTAS else 0))
             ),
         )
         dominant_emotion, intensity = updated_emotions.dominant()
