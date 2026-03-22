@@ -1,28 +1,28 @@
 {
-  "action": "MOVE_NORTH",
+  "action": "MOVE_SOUTH",
   "target_x": null,
   "target_y": null,
-  "reason": "Exploring the northern coast area to assess bridge opportunities and expand my knowledge of the terrain.",
+  "target_agent_id": null,
+  "reason": "The path east got blocked again. I'll go south first to get around and try to reach the river from a different angle.",
+  "intent": "Navigate around the blocked area by moving south, then head toward the river to collect water.",
+  "speech": "That east path keeps blocking me. Let me try going around from the south!",
+  "target_resource_kind": null,
+  "interaction_mode": "observe",
+  "desired_distance": null,
   "updated_emotions": {
-    "Joy": 5,
+    "Joy": 4,
     "Sadness": 1,
-    "Fear": 1,
-    "Anger": 0,
+    "Fear": 2,
+    "Anger": 1,
     "Disgust": 0,
-    "Surprise": 5
+    "Surprise": 2
   },
   "updated_needs": {
-    "Survival": 3,
+    "Survival": 4,
     "Safety": 4,
-    "Belonging": 3,
-    "Esteem": 5,
-    "Self_Actualization": 7
+    "Belonging": 5,
+    "Esteem": 4,
+    "Self_Actualization": 5
   },
-  "thought": "The coast calls to me - I must see what lies beyond and perhaps find a crossing point.",
-  "outbound_message": {
-    "scope": "civilization",
-    "target_faction_id": null,
-    "target_agent_id": null,
-    "text": "Moving north to explore the coast. Will report on bridge feasibility."
-  }
+  "thought": "Getting blocked twice is frustrating. But the river's still there — I'll find another way."
 }
