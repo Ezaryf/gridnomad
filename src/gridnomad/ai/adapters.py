@@ -43,70 +43,77 @@ class HeuristicLLMAdapter:
     def decide(self, agent_context: AgentContext) -> DecisionPayload:
         agent = agent_context.agent
         perception = agent_context.perception
-        action = "MOVE_NORTH"
+        action = "MOVE"
         target_x: int | None = None
         target_y: int | None = None
-        reason = "I am keeping momentum and exploring nearby terrain."
+        reason = "I want to keep exploring and stay useful to the people near me."
+        intent = "Keep moving through the area, look for resources, and stay close enough to help others."
+        speech = ""
         outbound_message: OutboundMessage | None = None
 
         if perception.hostile_agents:
             hostile = agent_context.world.agents[perception.hostile_agents[0]]
-            action = "ATTACK"
+            action = "INTERACT"
             target_x, target_y = hostile.x, hostile.y
-            reason = f"{hostile.name} is close enough to threaten me, so I will strike first."
+            reason = f"{hostile.name} feels dangerous, so I need to confront the situation carefully."
+            intent = f"Deal with the threat from {hostile.name} before it gets worse."
+            speech = f"{hostile.name}, back away. I do not want this to get worse."
             outbound_message = OutboundMessage(
                 scope="diplomacy",
                 target_faction_id=hostile.faction_id,
                 target_agent_id=hostile.id,
-                text=f"{hostile.name}, our borders are tense. Step back or we defend ourselves."
+                text=f"{hostile.name} is escalating tension near me."
             )
         elif agent.needs.survival >= 7 and perception.nearby_farmable:
             target_x, target_y = self._nearest_tile(agent, perception.nearby_farmable)
-            action = "CULTIVATE"
-            reason = "My survival need is urgent and this farmable ground can produce food."
+            action = "GATHER"
+            reason = "My survival need is urgent and this land looks useful for food or supplies."
+            intent = "Find food or usable materials before my survival need gets worse."
+            speech = "I need food and supplies soon."
             outbound_message = OutboundMessage(
                 scope="civilization",
-                text="I am preparing farmland nearby. Bring tools or food if you can."
+                text="I am searching this area for food and supplies."
             )
-        elif perception.nearby_water and agent.inventory.wood >= 2 and "bridge" in agent_context.cultural_context.lower():
-            adjacent_water = [
-                point
-                for point in perception.nearby_water
-                if abs(point[0] - agent.x) + abs(point[1] - agent.y) <= 1
-            ]
-            bridge_targets = adjacent_water or perception.nearby_water
-            target_x, target_y = self._nearest_tile(agent, bridge_targets)
-            action = "BUILD_BRIDGE"
-            reason = "Our culture values crossing water, and I have enough wood to help."
+        elif agent.inventory.wood >= 2 and agent.inventory.stone >= 1 and agent.needs.safety >= 6:
+            action = "BUILD"
+            reason = "I want a safer place to recover and I have enough materials to start something small."
+            intent = "Build a simple shelter or marker that makes this area feel safer."
+            speech = "I can turn this spot into a safer resting place."
             outbound_message = OutboundMessage(
                 scope="civilization",
-                text="I found a good crossing point. Meet me here and we can open a new route."
+                text="I am starting a small shelter here if anyone needs a safe place."
             )
         elif agent.needs.belonging >= 7 and perception.friendly_agents:
             friend = agent_context.world.agents[perception.friendly_agents[0]]
-            action = "ASK_FOR_HELP"
+            action = "INTERACT"
             target_x, target_y = friend.x, friend.y
             reason = f"I feel isolated and want to reconnect with {friend.name}."
+            intent = f"Move closer to {friend.name} and restore some sense of connection."
+            speech = f"{friend.name}, can we stay together for a while?"
             outbound_message = OutboundMessage(
                 scope="civilization",
                 target_agent_id=friend.id,
-                text=f"{friend.name}, I need support nearby. Can you move toward me?"
+                text=f"I need support from {friend.name} nearby."
             )
+        elif agent.inventory.food > 0 and agent.needs.survival >= 5:
+            action = "CONSUME"
+            reason = "I have food on hand and I need to stabilize myself before doing anything else."
+            intent = "Eat what I have and get steady before I move again."
         else:
-            move_names = list(MOVE_DELTAS)
-            index = (sum(ord(char) for char in agent.id) + agent_context.tick + self.deterministic_offset) % len(
-                move_names
-            )
+            move_names = sorted(MOVE_DELTAS)
+            index = (sum(ord(char) for char in agent.id) + agent_context.tick + self.deterministic_offset) % len(move_names)
             action = move_names[index]
-            reason = "I do not face an urgent conflict, so I am exploring a new direction."
+            reason = "I do not face an urgent crisis, so I want to explore and keep learning about this place."
+            intent = "Scout the nearby terrain, watch for resources, and stay mobile."
             if agent_context.tick % 4 == 0:
+                speech = "I am moving ahead to see what is out there."
                 outbound_message = OutboundMessage(
                     scope="civilization",
-                    text="I am scouting ahead and will report any useful terrain I find."
+                    text="I am scouting ahead and will report what I find."
                 )
 
         updated_emotions = Emotions(
-            joy=max(0, agent.emotions.joy - 1 + (1 if action in {"BUILD_BRIDGE", "FORM_ALLIANCE"} else 0)),
+            joy=max(0, agent.emotions.joy - 1 + (1 if action in {"BUILD", "INTERACT"} else 0)),
             sadness=max(0, agent.emotions.sadness - (1 if perception.friendly_agents else 0)),
             fear=min(10, agent.emotions.fear + (2 if perception.hostile_agents else 0)),
             anger=min(10, agent.emotions.anger + (1 if perception.hostile_agents else 0)),
@@ -114,23 +121,23 @@ class HeuristicLLMAdapter:
             surprise=min(10, agent.emotions.surprise + (1 if perception.visible_resources else 0)),
         )
         updated_needs = Needs(
-            survival=min(10, max(0, agent.needs.survival - (1 if action == "CULTIVATE" else 0))),
+            survival=min(10, max(0, agent.needs.survival - (1 if action in {"CONSUME", "GATHER"} else 0))),
             safety=min(10, max(0, agent.needs.safety + (1 if perception.hostile_agents else 0))),
-            belonging=min(10, max(0, agent.needs.belonging - (1 if action == "ASK_FOR_HELP" else 0))),
-            esteem=min(10, max(0, agent.needs.esteem + (1 if action in {"BUILD_BRIDGE", "ATTACK"} else 0))),
+            belonging=min(10, max(0, agent.needs.belonging - (1 if action == "INTERACT" else 0))),
+            esteem=min(10, max(0, agent.needs.esteem + (1 if action in {"BUILD", "TRANSFER"} else 0))),
             self_actualization=min(
-                10, max(0, agent.needs.self_actualization + (1 if action.startswith("MOVE_") else 0))
+                10, max(0, agent.needs.self_actualization + (1 if action in {"MOVE", *MOVE_DELTAS.keys()} else 0))
             ),
         )
         dominant_emotion, intensity = updated_emotions.dominant()
-        thought = f"{dominant_emotion} at {intensity}: {reason}"
+        thought = f"{dominant_emotion} at {intensity}: {intent}"
         cultural_innovation = None
-        if action == "BUILD_BRIDGE" and agent.personality.openness >= 7 and agent_context.tick % 3 == 0:
+        if action == "BUILD" and agent.personality.openness >= 7 and agent_context.tick % 3 == 0:
             from gridnomad.core.models import CulturalInnovation
 
             cultural_innovation = CulturalInnovation(
-                element="River Pact",
-                description="Honour those who build bridges for the faction.",
+                element="Safe Hearth",
+                description="The group respects people who create places of rest and safety.",
                 strength=65,
                 category="ritual",
             )
@@ -140,6 +147,8 @@ class HeuristicLLMAdapter:
             target_x=target_x,
             target_y=target_y,
             reason=reason,
+            intent=intent,
+            speech=speech,
             updated_emotions=updated_emotions,
             updated_needs=updated_needs,
             thought=thought,

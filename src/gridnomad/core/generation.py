@@ -151,13 +151,35 @@ def generate_seeded_world(
         for x in range(width):
             tile = tiles[y][x]
             tile.elevation = elevation_map[y][x]
+
+            if tile.elevation <= sea_level:
+                tile.height_level = 0
+            elif tile.elevation <= sea_level + 8:
+                tile.height_level = 1
+            elif tile.elevation <= sea_level + 20:
+                tile.height_level = 2
+            elif tile.elevation <= sea_level + 35:
+                tile.height_level = 3
+            elif tile.elevation <= sea_level + 50:
+                tile.height_level = 4
+            else:
+                tile.height_level = 5
+
             if elevation_map[y][x] <= sea_level:
                 tile.terrain = TileType.WATER
-                tile.biome = biome_palette["ocean"]
                 tile.feature = "sea"
+                depth = sea_level - elevation_map[y][x]
+                if depth >= 25:
+                    tile.biome = "deep-ocean"
+                elif depth >= 15:
+                    tile.biome = "ocean"
+                elif depth >= 5:
+                    tile.biome = "shallow-ocean"
+                else:
+                    tile.biome = "close-ocean"
             else:
                 tile.terrain = TileType.PLAIN
-                tile.biome = biome_palette["grassland"]
+                tile.biome = "grassland"
 
     sea_distance = _distance_map(width, height, [(x, y) for y in range(height) for x in range(width) if tiles[y][x].terrain == TileType.WATER])
     river_paths = _generate_rivers(tiles, elevation_map, sea_distance, settings, rng)
@@ -174,10 +196,15 @@ def generate_seeded_world(
             if tile.terrain == TileType.WATER:
                 if tile.feature == "river":
                     tile.biome = "river"
-                elif sea_distance[y][x] <= 3:
-                    tile.biome = biome_palette["coast"]
+                elif sea_distance[y][x] <= 2:
+                    tile.biome = "lagoon"
+                elif sea_distance[y][x] <= 4:
+                    tile.biome = "shallow-ocean"
                 else:
-                    tile.biome = biome_palette["ocean"]
+                    if tile.elevation <= sea_level - 15:
+                        tile.biome = "deep-ocean"
+                    else:
+                        tile.biome = "ocean"
                 tile.moisture = 100
                 tile.fertility = 0
                 tile.resource_tags = ["water"]
@@ -195,61 +222,103 @@ def generate_seeded_world(
             fertility = int(max(0.0, min(1.0, ((moisture / 100.0) * 0.7) + (water_bonus * 0.3))) * 100)
             tile.fertility = fertility
 
-            biome_bias = (settings.biome_density - 50) / 100.0
+            temperature = int(temperature_noise * 100)
+            magic = int(arcane_noise * 100)
 
-            if tile.elevation >= max(74, sea_level + 22) and ridge_map[y][x] >= 0.48:
+            pots = {
+                "grassland": 24.0,
+                "fertile-plains": 0.0,
+                "meadow": 0.0,
+                "forest": 0.0,
+                "jungle": 0.0,
+                "savanna": 0.0,
+                "desert": 0.0,
+                "tundra": 0.0,
+                "snow": 0.0,
+                "swamp": 0.0,
+                "crystal": 0.0,
+                "volcanic": 0.0,
+                "arcane": 0.0,
+                "corrupted": 0.0,
+                "coast": 0.0,
+                "hills": 0.0,
+                "mountain": 0.0,
+            }
+
+            if fertility > 62:
+                pots["meadow"] += (fertility - 62) * 1.3
+            if fertility > 72 and water_distance[y][x] <= 8:
+                pots["fertile-plains"] += (fertility - 72) * 2.0
+            if moisture > 52:
+                pots["forest"] += (moisture - 52) * 1.5
+            if moisture > 76 and temperature > 58:
+                pots["jungle"] += (moisture - 76) * 2.3 + max(0, temperature - 58)
+            if moisture > 78 and water_distance[y][x] <= 5:
+                pots["swamp"] += (moisture - 78) * 2.2
+            if temperature > 65 and moisture < 40:
+                pots["desert"] += (temperature - 65) * 2.5 + (40 - moisture)
+            if temperature > 60 and 34 <= moisture <= 56:
+                pots["savanna"] += (temperature - 60) * 1.8
+            if temperature < 32:
+                pots["tundra"] += (32 - temperature) * 2.0
+            if temperature < 22 or (tile.height_level >= 4 and temperature < 46):
+                pots["snow"] += (22 - temperature) * 3.0 if temperature < 22 else 24.0
+
+            if magic > 82:
+                pots["arcane"] += (magic - 82) * 4.0
+                pots["crystal"] += (magic - 82) * 2.0
+            if magic < 12:
+                pots["corrupted"] += (12 - magic) * 4.0
+
+            if tile.height_level == 1 and water_distance[y][x] <= 3:
+                pots["coast"] += 100.0
+            if tile.height_level == 3:
+                pots["hills"] += 52.0 + (ridge_map[y][x] * 22.0)
+            if tile.height_level >= 4:
+                pots["mountain"] += 80.0 + (tile.height_level - 4) * 50.0
+                if temperature > 75:
+                    pots["volcanic"] += 60.0 + (temperature - 75) * 2.0
+
+            best_biome = max(pots.items(), key=lambda item: item[1])[0]
+
+            if best_biome == "mountain":
                 tile.feature = "mountain"
-                tile.biome = "crystal" if arcane_noise > 0.81 else ("volcanic" if arcane_noise < 0.14 else biome_palette["alpine"])
-                if _hash01(settings.seed + 923, x, y) > 0.35:
+                tile.biome = "mountain"
+                if _hash01(settings.seed + 923, x, y) > 0.42:
                     tile.resource = "stone"
-                if _hash01(settings.seed + 517, x, y) > 0.44:
+                if _hash01(settings.seed + 517, x, y) > 0.8:
                     props.append(_prop("mountain", x, y, variant=_variant(settings.seed + 5, x, y, 4)))
-            elif moisture >= (74 - biome_bias * 12) and temperature_noise >= 0.7 and tile.elevation < 66:
-                tile.feature = "forest"
-                tile.biome = "jungle"
-            elif moisture >= (62 - biome_bias * 10) and tile.elevation < 78 and _hash01(settings.seed + 617, x, y) > 0.28:
-                tile.feature = "forest"
-                tile.biome = biome_palette["forest"]
-                if _hash01(settings.seed + 771, x, y) > 0.42:
-                    tile.resource = "wood"
-                if _hash01(settings.seed + 557, x, y) > 0.46:
-                    props.append(
-                        _prop(
-                            "tree-cluster",
-                            x,
-                            y,
-                            variant=_variant(settings.seed + 19, x, y, 5),
-                            density=1 + _variant(settings.seed + 23, x, y, 3),
-                        )
-                    )
-            elif moisture <= 18 and temperature_noise >= 0.58:
-                tile.biome = "desert"
-                tile.resource = tile.resource or "stone"
-            elif moisture <= 32 and temperature_noise >= 0.46:
-                tile.biome = "savanna"
-            elif moisture >= 72 and tile.elevation < 48:
-                tile.biome = "swamp"
-            elif temperature_noise <= 0.22:
-                tile.biome = "snow" if tile.elevation >= 64 else "tundra"
-            elif moisture <= 28:
-                tile.biome = biome_palette["scrub"]
-                if _hash01(settings.seed + 809, x, y) > 0.78:
-                    props.append(_prop("stone-outcrop", x, y, variant=_variant(settings.seed + 43, x, y, 3)))
-            elif sea_distance[y][x] <= 3:
-                tile.biome = biome_palette["coast"]
-                if _hash01(settings.seed + 877, x, y) > 0.83:
-                    props.append(_prop("reed-bank", x, y, variant=_variant(settings.seed + 47, x, y, 3)))
-            elif fertility >= 72:
-                tile.biome = "fertile-plains"
             else:
-                tile.biome = biome_palette["grassland"] if moisture < 58 else biome_palette["meadow"]
-                if _hash01(settings.seed + 991, x, y) > 0.9:
+                tile.biome = best_biome
+                if best_biome in {"forest", "jungle"}:
+                    tile.feature = "forest"
+                    if _hash01(settings.seed + 771, x, y) > 0.5:
+                        tile.resource = "wood"
+                    if _hash01(settings.seed + 557, x, y) > 0.82:
+                        props.append(
+                            _prop(
+                                "tree-cluster",
+                                x,
+                                y,
+                                variant=_variant(settings.seed + 19, x, y, 5),
+                                density=1 + _variant(settings.seed + 23, x, y, 3),
+                            )
+                        )
+                elif best_biome in {"grassland", "meadow", "fertile-plains", "arcane"} and _hash01(settings.seed + 991, x, y) > 0.975:
                     props.append(_prop("grove", x, y, variant=_variant(settings.seed + 59, x, y, 4)))
+                elif best_biome in {"coast", "swamp"} and _hash01(settings.seed + 877, x, y) > 0.93:
+                    props.append(_prop("reed-bank", x, y, variant=_variant(settings.seed + 47, x, y, 3)))
+                elif best_biome in {"desert", "savanna", "hills", "volcanic"} and _hash01(settings.seed + 809, x, y) > 0.94:
+                    props.append(_prop("stone-outcrop", x, y, variant=_variant(settings.seed + 43, x, y, 3)))
+                if best_biome in {"hills", "volcanic"} and _hash01(settings.seed + 1203, x, y) > 0.8:
+                    tile.resource = tile.resource or "stone"
+                if best_biome in {"crystal", "arcane"}:
+                    tile.resource = tile.resource or "stone"
 
             tile.farmable = (
                 tile.terrain == TileType.PLAIN
-                and tile.feature not in {"mountain"}
-                and tile.biome in {biome_palette["grassland"], biome_palette["meadow"], biome_palette["coast"]}
+                and tile.feature != "mountain"
+                and tile.biome in {"grassland", "fertile-plains", "meadow", "coast", "savanna", "arcane"}
                 and moisture >= 28
             )
             if tile.resource is None and tile.farmable and _hash01(settings.seed + 1013, x, y) > 0.93:
@@ -740,16 +809,16 @@ def _resource_tags_for_tile(tile: TileState) -> list[str]:
         tags.append("food")
     if tile.feature == "forest" or tile.biome in {"forest", "jungle"}:
         tags.append("wood")
-    if tile.feature == "mountain" or tile.biome in {"alpine", "crystal", "volcanic"}:
+    if tile.feature == "mountain" or tile.biome in {"hills", "mountain", "crystal", "volcanic"}:
         tags.append("stone")
-    if tile.biome == "crystal":
+    if tile.biome in {"crystal", "arcane"}:
         tags.append("crystal")
     return sorted(dict.fromkeys(tags))
 
 
 def _danger_tags_for_tile(tile: TileState) -> list[str]:
     tags: list[str] = []
-    if tile.biome in {"volcanic", "swamp"}:
+    if tile.biome in {"volcanic", "swamp", "corrupted"}:
         tags.append("hazard")
     if tile.biome in {"crystal", "arcane"}:
         tags.append("arcane")
@@ -766,9 +835,9 @@ def _race_affinity_for_tile(tile: TileState) -> dict[str, int]:
         affinity["human"] += 25
     if tile.biome in {"forest", "jungle", "grove", "meadow"}:
         affinity["elf"] += 30
-    if tile.biome in {"alpine", "crystal", "mountain"} or tile.feature == "mountain":
+    if tile.biome in {"hills", "crystal", "mountain"} or tile.feature == "mountain":
         affinity["dwarf"] += 34
-    if tile.biome in {"scrub", "desert", "savanna", "volcanic"}:
+    if tile.biome in {"desert", "savanna", "volcanic", "corrupted"}:
         affinity["orc"] += 30
     if "hazard" in tile.danger_tags:
         affinity["human"] -= 12
@@ -788,6 +857,8 @@ def _city_score_for_tile(tile: TileState, water_distance: int) -> int:
         base -= 12
     if tile.biome == "fertile-plains":
         base += 10
+    if tile.biome in {"swamp", "volcanic", "corrupted"}:
+        base -= 10
     return max(0, min(100, base))
 
 
@@ -831,13 +902,15 @@ def _choose_tile_decal(tile: TileState, seed: int, x: int, y: int) -> str | None
         return "snow-cap"
     if tile.biome in {"coast", "lagoon", "shoreline"} and value > 0.68:
         return "shell-bank"
-    if tile.biome in {"grassland", "meadow", "island-grass", "orchard", "high-pasture", "vale"}:
+    if tile.biome in {"grassland", "meadow", "fertile-plains", "island-grass", "orchard", "high-pasture", "vale"}:
         if value > 0.9:
             return "wildflowers"
         if value > 0.78:
             return "grass-tuft"
-    if tile.biome in {"scrub", "dune", "moor"} and value > 0.82:
+    if tile.biome in {"savanna", "desert", "hills", "dune", "moor"} and value > 0.82:
         return "pebbles"
+    if tile.biome in {"jungle", "swamp", "arcane"} and value > 0.74:
+        return "fern-cluster"
     return None
 
 

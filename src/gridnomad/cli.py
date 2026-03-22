@@ -20,7 +20,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument(
         "--settings",
         default=None,
-        help="Optional JSON file with per-civilization AI provider settings.",
+        help="Optional JSON file with per-group AI provider settings.",
     )
 
     stream_parser = subparsers.add_parser("run-stream", help="Run a scenario and stream tick updates as NDJSON.")
@@ -243,10 +243,10 @@ def _add_world_arguments(parser: argparse.ArgumentParser) -> None:
         help="Optional landmark density override.",
     )
     parser.add_argument("--biome-density", type=int, default=None, help="Optional biome density override.")
-    parser.add_argument("--fauna-density", type=int, default=None, help="Optional fauna density override.")
+    parser.add_argument("--fauna-density", type=int, default=None, help="Optional legacy world density override.")
     parser.add_argument(
         "--kingdom-growth-intensity",
         type=int,
         default=None,
-        help="Optional kingdom growth intensity override.",
+        help="Optional legacy world intensity override.",
     )

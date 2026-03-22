@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   PROVIDER_OPTIONS,
+  addGroup,
   buildRuntimeControllerMap,
   normalizeSettings,
   synthesizeScenario
@@ -20,7 +21,7 @@ const BASE_SCENARIO = {
     map_height: 64,
     coastline_bias: 58,
     river_count: 8,
-    settlement_density: 18,
+    settlement_density: 10,
     landmark_density: 16
   },
   generator: {
@@ -30,11 +31,11 @@ const BASE_SCENARIO = {
     height: 64,
     coastline_bias: 58,
     river_count: 8,
-    settlement_density: 18,
+    settlement_density: 10,
     landmark_density: 16
   },
   factions: [
-    { id: "red", name: "Crimson Reach", color: "#dd6f6a", culture: [{ category: "norm", element: "River Pact", description: "Build together.", strength: 80 }] },
+    { id: "red", name: "Crimson Reach", color: "#dd6f6a", culture: [{ category: "norm", element: "River Pact", description: "Stay together.", strength: 80 }] },
     { id: "blue", name: "Azure House", color: "#6aa8e7", culture: [{ category: "ritual", element: "Harbor Supper", description: "Eat together.", strength: 75 }] }
   ],
   agents: [
@@ -60,50 +61,46 @@ const BASE_SCENARIO = {
 };
 
 
-test("normalizeSettings migrates legacy groups into starter kingdoms", () => {
+test("normalizeSettings keeps groups and migrates kingdoms into groups", () => {
   const normalized = normalizeSettings(BASE_SCENARIO, {
-    groups: [
+    starter_kingdoms: [
       {
-        id: "red",
-        name: "Crimson Reach",
+        id: "manual-keep",
+        name: "Manual Keep",
         color: "#dd6f6a",
-        population_count: 6,
+        population: 6,
         controller: { provider: "opencode", model: "gpt-5/open" }
       }
     ]
   });
 
-  assert.ok(Array.isArray(normalized.races));
-  assert.ok(Array.isArray(normalized.starter_kingdoms));
-  assert.equal(normalized.starter_kingdoms[0].controller.provider, "opencode");
-  assert.equal(normalized.starter_kingdoms[0].race_kind, "human");
+  assert.ok(Array.isArray(normalized.groups));
+  assert.equal(normalized.groups[0].controller.provider, "opencode");
+  assert.equal(normalized.groups[0].population_count, 6);
 });
 
 
-test("synthesizeScenario expands races, kingdoms, and fauna into runtime factions and humans", () => {
+test("synthesizeScenario expands groups into runtime factions and humans", () => {
   const normalized = normalizeSettings(BASE_SCENARIO, {
-    world: { seed: 91, width: 80, height: 80, faunaDensity: 70 },
-    races: [
-      { id: "human", enabled: true, auto_seed_count: 1, starting_population: 12 },
-      { id: "orc", enabled: true, auto_seed_count: 1, starting_population: 10 },
-      { id: "elf", enabled: false, auto_seed_count: 0 },
-      { id: "dwarf", enabled: false, auto_seed_count: 0 }
-    ],
-    starter_kingdoms: [
+    world: { seed: 91, width: 80, height: 80 },
+    groups: [
       {
         id: "manual-keep",
         name: "Manual Keep",
-        race_kind: "human",
-        population: 8,
+        color: "#dd6f6a",
+        population_count: 8,
+        culture_summary: "Share food and stay close.",
         controller: { provider: "heuristic" }
+      },
+      {
+        id: "blue-circle",
+        name: "Blue Circle",
+        color: "#6aa8e7",
+        population_count: 4,
+        culture_summary: "Keep exploring and report back.",
+        controller: { provider: "gemini-cli", model: "gemini-2.5-pro" }
       }
-    ],
-    fauna: {
-      species: [
-        { id: "wolves", enabled: true, count: 5 },
-        { id: "dragons", enabled: true, count: 1 }
-      ]
-    }
+    ]
   });
 
   const runtimeScenario = synthesizeScenario(BASE_SCENARIO, normalized);
@@ -111,30 +108,30 @@ test("synthesizeScenario expands races, kingdoms, and fauna into runtime faction
   assert.equal(runtimeScenario.config.world_seed, 91);
   assert.equal(runtimeScenario.generator.width, 80);
   assert.ok(runtimeScenario.factions.some((faction) => faction.id === "manual-keep"));
-  assert.ok(runtimeScenario.factions.some((faction) => faction.race_kind === "orc"));
-  assert.ok(runtimeScenario.agents.some((agent) => agent.race_kind === "human"));
   assert.ok(runtimeScenario.agents.some((agent) => agent.faction_id === "manual-keep"));
-  assert.equal(runtimeScenario.fauna.species.find((item) => item.id === "wolves")?.count, 5);
+  assert.equal(runtimeScenario.fauna.species.length, 0);
 });
 
 
-test("runtime controller map resolves kingdoms into faction controller config", () => {
+test("runtime controller map resolves groups into faction controller config", () => {
   const normalized = normalizeSettings(BASE_SCENARIO, {
-    races: [
-      { id: "human", enabled: true, auto_seed_count: 1, controller: { provider: "gemini-cli", model: "gemini-2.5-pro" } },
-      { id: "orc", enabled: false, auto_seed_count: 0 },
-      { id: "elf", enabled: false, auto_seed_count: 0 },
-      { id: "dwarf", enabled: false, auto_seed_count: 0 }
-    ],
-    starter_kingdoms: [
-      { id: "manual-keep", name: "Manual Keep", race_kind: "human", population: 6, controller: { provider: "openai", model: "gpt-5-mini", apiKey: "sk" } }
+    groups: [
+      { id: "manual-keep", name: "Manual Keep", population_count: 6, controller: { provider: "openai", model: "gpt-5-mini", apiKey: "sk" } },
+      { id: "blue-circle", name: "Blue Circle", population_count: 4, controller: { provider: "gemini-cli", model: "gemini-2.5-pro" } }
     ]
   });
 
   const runtime = buildRuntimeControllerMap(normalized);
   assert.equal(runtime.factions["manual-keep"].provider, "openai");
-  const autoFactionIds = Object.keys(runtime.factions).filter((id) => id !== "manual-keep");
-  assert.equal(runtime.factions[autoFactionIds[0]].provider, "gemini-cli");
+  assert.equal(runtime.factions["blue-circle"].provider, "gemini-cli");
+});
+
+
+test("addGroup appends a new default group", () => {
+  const normalized = normalizeSettings(BASE_SCENARIO, { groups: [{ id: "group-01", name: "A", population_count: 2 }] });
+  const next = addGroup(normalized, BASE_SCENARIO);
+  assert.equal(next.groups.length, 2);
+  assert.ok(next.groups[1].id.startsWith("group-"));
 });
 
 

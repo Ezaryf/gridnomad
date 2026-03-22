@@ -117,7 +117,14 @@ def load_scenario(
     world.kingdoms = _build_kingdoms(data, world)
     world.cities = _build_cities(world)
     world.structures = _build_structures(world)
-    world.animals = _build_animals(data.get("fauna"), world, config.world_seed, config.fauna_density)
+    world.animals = _build_animals(
+        data.get("fauna"),
+        world,
+        config.world_seed,
+        config.fauna_density,
+    )
+    world.battles = {}
+    world.fauna_events = []
     _refresh_worldbox_relationships(world)
     culture_store = CultureStore()
     for faction in data.get("factions", []):

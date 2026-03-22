@@ -4,51 +4,52 @@ import unittest
 
 from helpers import build_agent, build_simulation, farmable_tile, water_tile
 from gridnomad.ai.adapters import ScriptedLLMAdapter
-from gridnomad.core.models import CulturalInnovation, DecisionPayload, Emotions, Needs, OutboundMessage
+from gridnomad.core.models import CulturalInnovation, DecisionPayload, Emotions, Needs, OutboundMessage, TileType
 from gridnomad.core.perception import build_perception
 
 
 class SimulationTests(unittest.TestCase):
-    def test_salience_detects_urgent_need_and_changed_context(self) -> None:
+    def test_salience_reports_full_ai_mode_and_context(self) -> None:
         ada = build_agent("ada", "red", 1, 1, survival=8)
         simulation = build_simulation(agents=[ada], tile_overrides=[(2, 1, water_tile())])
         agent = simulation.world.agents["ada"]
-        self.assertEqual(simulation.world.get_tile(2, 1).terrain.value, "water")
         perception = build_perception(simulation.world, agent, simulation.config.perception_radius)
         salience = simulation.evaluate_salience(agent, perception, recent_events=[])
         self.assertTrue(salience.should_reason)
+        self.assertIn("full_ai_mode", salience.reasons)
         self.assertIn("urgent_need", salience.reasons)
         self.assertIn("new_context", salience.reasons)
-        self.assertIn("reason_interval", salience.reasons)
 
-    def test_scripted_bridge_step_records_memory_and_culture(self) -> None:
-        ada = build_agent("ada", "red", 1, 1, wood=3)
+    def test_scripted_build_step_records_intent_memory_and_culture(self) -> None:
+        ada = build_agent("ada", "red", 1, 1, wood=3, stone=2)
         scripted = ScriptedLLMAdapter(
             {
                 "ada": [
                     DecisionPayload(
-                        action="BUILD_BRIDGE",
-                        target_x=2,
+                        action="BUILD",
+                        target_x=1,
                         target_y=1,
-                        reason="The river blocks our path.",
+                        reason="I need a safe resting place.",
+                        intent="build a small shelter so the group can recover here",
+                        speech="I am turning this spot into a safe place to rest.",
                         updated_emotions=Emotions(joy=6, sadness=1, fear=1, anger=0, disgust=0, surprise=4),
                         updated_needs=Needs(
                             survival=4,
-                            safety=4,
+                            safety=3,
                             belonging=4,
                             esteem=6,
                             self_actualization=5,
                         ),
-                        thought="Building this bridge should help everyone.",
+                        thought="A shelter will make this place feel livable.",
                         cultural_innovation=CulturalInnovation(
-                            element="Bridge Oath",
-                            description="Celebrate builders who reconnect land.",
+                            element="Safe Hearth",
+                            description="Respect the people who make safe resting places.",
                             strength=70,
                             category="ritual",
                         ),
                         outbound_message=OutboundMessage(
                             scope="civilization",
-                            text="The bridge is going up. Meet me at the river."
+                            text="I have started a safe shelter here."
                         ),
                     )
                 ]
@@ -56,13 +57,12 @@ class SimulationTests(unittest.TestCase):
         )
         simulation = build_simulation(
             agents=[ada],
-            tile_overrides=[(2, 1, water_tile())],
             culture_seed={
                 "red": [
                     {
                         "category": "norm",
-                        "element": "River Pact",
-                        "description": "Build bridges for the clan.",
+                        "element": "Harbor Supper",
+                        "description": "People share food and rest together.",
                         "strength": 75,
                     }
                 ]
@@ -70,60 +70,67 @@ class SimulationTests(unittest.TestCase):
             adapter=scripted,
         )
         events = simulation.step()
-        self.assertTrue(any(event.kind == "BUILD_BRIDGE" and event.success for event in events))
+        self.assertTrue(any(event.kind == "INTENT" for event in events))
+        self.assertTrue(any(event.kind == "SPEECH" for event in events))
+        self.assertTrue(any(event.kind == "BUILD" and event.success for event in events))
         self.assertTrue(any(event.kind == "CULTURAL_INNOVATION" for event in events))
         self.assertTrue(any(event.kind == "COMMUNICATION" for event in events))
-        self.assertEqual(simulation.world.get_tile(2, 1).terrain.value, "bridge")
-        self.assertIn("Building this bridge should help everyone.", simulation.memory_store.recent_thoughts("ada"))
-        self.assertIn("Bridge Oath", simulation.culture_store.summarize("red"))
-        self.assertTrue(simulation.world.communications)
-        self.assertIn("bridge is going up", simulation.world.communications[-1].text.lower())
+        self.assertEqual(simulation.world.get_tile(1, 1).terrain, TileType.HOUSE)
+        self.assertEqual(simulation.world.agents["ada"].current_intent, "build a small shelter so the group can recover here")
+        self.assertEqual(simulation.world.agents["ada"].last_speech, "I am turning this spot into a safe place to rest.")
+        self.assertIn("A shelter will make this place feel livable.", simulation.memory_store.recent_thoughts("ada"))
+        self.assertIn("Safe Hearth", simulation.culture_store.summarize("red"))
 
-    def test_trade_attack_and_alliance_actions_mutate_world(self) -> None:
-        ada = build_agent("ada", "red", 1, 1, food=0, wood=2, stone=0)
-        bo = build_agent("bo", "blue", 2, 1, food=3, wood=0, stone=1, health=2)
-        simulation = build_simulation(agents=[ada, bo])
+    def test_transfer_interact_and_gather_mutate_world(self) -> None:
+        ada = build_agent("ada", "red", 1, 1, food=1, wood=2, stone=1, belonging=8)
+        bo = build_agent("bo", "red", 2, 1, food=0, wood=0, stone=0)
+        simulation = build_simulation(agents=[ada, bo], tile_overrides=[(1, 1, farmable_tile())])
 
-        alliance = DecisionPayload(
-            action="FORM_ALLIANCE",
+        transfer = DecisionPayload(
+            action="TRANSFER",
             target_x=2,
             target_y=1,
-            reason="Peace is useful.",
+            reason="Bo needs supplies.",
+            intent="share whatever I have most of with Bo",
+            speech="Take this and keep going.",
             updated_emotions=ada.emotions,
             updated_needs=ada.needs,
-            thought="We should stop fighting.",
+            thought="Sharing keeps the group together.",
         )
-        trade = DecisionPayload(
-            action="TRADE",
+        interact = DecisionPayload(
+            action="INTERACT",
             target_x=2,
             target_y=1,
-            reason="I need food.",
+            reason="I feel isolated.",
+            intent="spend time with Bo and reconnect",
+            speech="Stay close for a bit.",
             updated_emotions=ada.emotions,
             updated_needs=ada.needs,
-            thought="A fair trade keeps us alive.",
+            thought="I need company.",
         )
-        attack = DecisionPayload(
-            action="ATTACK",
-            target_x=2,
+        gather = DecisionPayload(
+            action="GATHER",
+            target_x=1,
             target_y=1,
-            reason="The alliance failed.",
+            reason="This tile should have useful supplies.",
+            intent="gather something useful from this area",
+            speech="I can find something useful here.",
             updated_emotions=ada.emotions,
             updated_needs=ada.needs,
-            thought="I have no safer option.",
+            thought="Worth checking the ground closely.",
         )
 
-        alliance_events = simulation._apply_action(simulation.registry.resolve(alliance, simulation.world, ada))
-        self.assertTrue(alliance_events[0].success)
-        self.assertIn("blue", simulation.world.factions["red"].alliances)
+        transfer_events = simulation._apply_action(simulation.registry.resolve(transfer, simulation.world, ada), transfer)
+        self.assertTrue(transfer_events[0].success)
+        self.assertEqual(bo.inventory.wood, 1)
 
-        trade_events = simulation._apply_action(simulation.registry.resolve(trade, simulation.world, ada))
-        self.assertTrue(trade_events[0].success)
-        self.assertEqual(ada.inventory.food, 1)
-        self.assertEqual(bo.inventory.food, 2)
+        interact_events = simulation._apply_action(simulation.registry.resolve(interact, simulation.world, ada), interact)
+        self.assertTrue(interact_events[0].success)
+        self.assertLess(ada.needs.belonging, 8)
 
-        attack_events = simulation._apply_action(simulation.registry.resolve(attack, simulation.world, ada))
-        self.assertTrue(any(event.kind == "DEATH" for event in attack_events))
-        self.assertFalse(bo.alive)
+        gather_events = simulation._apply_action(simulation.registry.resolve(gather, simulation.world, ada), gather)
+        self.assertTrue(gather_events[0].success)
+        self.assertGreaterEqual(ada.inventory.food, 1)
 
     def test_invalid_model_response_uses_safe_fallback(self) -> None:
         ada = build_agent("ada", "red", 1, 1, survival=8)
@@ -134,10 +141,17 @@ class SimulationTests(unittest.TestCase):
             adapter=adapter,
         )
         events = simulation.step()
-        self.assertTrue(any(event.kind in {"MOVE", "CULTIVATE"} for event in events))
+        self.assertTrue(any(event.kind in {"MOVE", "REST"} for event in events))
         self.assertTrue(simulation.world.agents["ada"].alive)
 
-    def test_diplomacy_messages_are_visible_to_involved_factions(self) -> None:
+    def test_no_survival_death_before_tick_40(self) -> None:
+        ada = build_agent("ada", "red", 1, 1, health=1, survival=10)
+        simulation = build_simulation(agents=[ada])
+        for _ in range(20):
+            simulation.step()
+        self.assertTrue(simulation.world.agents["ada"].alive)
+
+    def test_diplomacy_messages_are_visible_to_involved_groups(self) -> None:
         ada = build_agent("ada", "red", 1, 1)
         bo = build_agent("bo", "blue", 2, 1)
         suri = build_agent("suri", "gold", 3, 1)
@@ -145,17 +159,19 @@ class SimulationTests(unittest.TestCase):
             {
                 "ada": [
                     DecisionPayload(
-                        action="FORM_ALLIANCE",
+                        action="COMMUNICATE",
                         target_x=2,
                         target_y=1,
-                        reason="Trade would benefit us both.",
+                        reason="Cross-group coordination matters here.",
+                        intent="open a calm conversation with the blue group",
+                        speech="Blue group, can we talk before this gets tense?",
                         updated_emotions=ada.emotions,
                         updated_needs=ada.needs,
-                        thought="We should talk before the next march.",
+                        thought="Talking first is safer than guessing.",
                         outbound_message=OutboundMessage(
                             scope="diplomacy",
                             target_faction_id="blue",
-                            text="Blue faction, let's open talks near the river."
+                            text="Blue group, can we talk near the river?"
                         ),
                     )
                 ],
@@ -165,9 +181,11 @@ class SimulationTests(unittest.TestCase):
                         target_x=1,
                         target_y=1,
                         reason="I am approaching the discussion.",
+                        intent="move closer so I can hear the message directly",
+                        speech="I am listening.",
                         updated_emotions=bo.emotions,
                         updated_needs=bo.needs,
-                        thought="I should hear them out.",
+                        thought="Better to hear them out first.",
                     )
                 ],
                 "suri": [
@@ -176,9 +194,11 @@ class SimulationTests(unittest.TestCase):
                         target_x=2,
                         target_y=1,
                         reason="I am scouting quietly.",
+                        intent="watch from a distance without joining the talk",
+                        speech="",
                         updated_emotions=suri.emotions,
                         updated_needs=suri.needs,
-                        thought="Watching from a distance.",
+                        thought="I should not step into that yet.",
                     )
                 ],
             }

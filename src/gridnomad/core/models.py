@@ -296,6 +296,7 @@ class TileState:
     road_mask: int = 0
     decal: str | None = None
     elevation_band: str = "lowland"
+    height_level: int = 0
     fertility: int = 0
     resource_tags: list[str] = field(default_factory=list)
     danger_tags: list[str] = field(default_factory=list)
@@ -322,6 +323,7 @@ class TileState:
             road_mask=require_int("road_mask", data.get("road_mask", 0), 0, 15, clamp=True),
             decal=data.get("decal"),
             elevation_band=str(data.get("elevation_band", "lowland")),
+            height_level=require_int("height_level", data.get("height_level", 0), 0, 5, clamp=True),
             fertility=require_int("fertility", data.get("fertility", 0), 0, 100, clamp=True),
             resource_tags=[str(item) for item in data.get("resource_tags", [])],
             danger_tags=[str(item) for item in data.get("danger_tags", [])],
@@ -382,6 +384,7 @@ class TileState:
             "road_mask": self.road_mask,
             "decal": self.decal,
             "elevation_band": self.elevation_band,
+            "height_level": self.height_level,
             "fertility": self.fertility,
             "resource_tags": list(self.resource_tags),
             "danger_tags": list(self.danger_tags),
@@ -439,6 +442,7 @@ class IntentState:
     target_x: int | None = None
     target_y: int | None = None
     reason: str = ""
+    intent: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -446,6 +450,7 @@ class IntentState:
             "target_x": self.target_x,
             "target_y": self.target_y,
             "reason": self.reason,
+            "intent": self.intent,
         }
 
 
@@ -472,6 +477,12 @@ class AgentState:
     last_perception_signature: str = ""
     last_intent: IntentState | None = None
     last_goal: str | None = None
+    current_intent: str = ""
+    last_speech: str = ""
+    last_thought: str = ""
+    age_ticks: int = 0
+    tick_born: int = 0
+    critical_survival_ticks: int = 0
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "AgentState":
@@ -496,6 +507,12 @@ class AgentState:
             last_action_success=bool(data.get("last_action_success", True)),
             last_perception_signature=str(data.get("last_perception_signature", "")),
             last_goal=data.get("last_goal"),
+            current_intent=str(data.get("current_intent", "")),
+            last_speech=str(data.get("last_speech", "")),
+            last_thought=str(data.get("last_thought", "")),
+            age_ticks=require_int("age_ticks", data.get("age_ticks", 0), 0),
+            tick_born=require_int("tick_born", data.get("tick_born", 0), 0),
+            critical_survival_ticks=require_int("critical_survival_ticks", data.get("critical_survival_ticks", 0), 0),
         )
 
     @property
@@ -525,6 +542,12 @@ class AgentState:
             "last_perception_signature": self.last_perception_signature,
             "last_intent": self.last_intent.to_dict() if self.last_intent else None,
             "last_goal": self.last_goal,
+            "current_intent": self.current_intent,
+            "last_speech": self.last_speech,
+            "last_thought": self.last_thought,
+            "age_ticks": self.age_ticks,
+            "tick_born": self.tick_born,
+            "critical_survival_ticks": self.critical_survival_ticks,
         }
 
 
@@ -899,7 +922,12 @@ class WorldState:
                 for y, row in enumerate(self.tiles)
             ],
             "agents": {agent_id: agent.to_dict() for agent_id, agent in sorted(self.agents.items())},
+            "humans": {agent_id: agent.to_dict() for agent_id, agent in sorted(self.agents.items())},
             "factions": {
+                faction_id: faction.to_dict()
+                for faction_id, faction in sorted(self.factions.items())
+            },
+            "groups": {
                 faction_id: faction.to_dict()
                 for faction_id, faction in sorted(self.factions.items())
             },
@@ -998,6 +1026,8 @@ class DecisionPayload:
     target_x: int | None
     target_y: int | None
     reason: str
+    intent: str
+    speech: str
     updated_emotions: Emotions
     updated_needs: Needs
     thought: str
@@ -1015,6 +1045,8 @@ class DecisionPayload:
             target_x=None if data.get("target_x") is None else require_int("target_x", data["target_x"]),
             target_y=None if data.get("target_y") is None else require_int("target_y", data["target_y"]),
             reason=str(data["reason"]),
+            intent=str(data.get("intent", data.get("reason", ""))),
+            speech=str(data.get("speech", "")),
             updated_emotions=Emotions.from_dict(data["updated_emotions"], clamp=clamp_states),
             updated_needs=Needs.from_dict(data["updated_needs"], clamp=clamp_states),
             thought=str(data["thought"]),
@@ -1036,6 +1068,7 @@ class DecisionPayload:
             target_x=self.target_x,
             target_y=self.target_y,
             reason=self.reason,
+            intent=self.intent,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -1044,6 +1077,8 @@ class DecisionPayload:
             "target_x": self.target_x,
             "target_y": self.target_y,
             "reason": self.reason,
+            "intent": self.intent,
+            "speech": self.speech,
             "updated_emotions": self.updated_emotions.to_dict(),
             "updated_needs": self.updated_needs.to_dict(),
             "thought": self.thought,

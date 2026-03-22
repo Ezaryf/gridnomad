@@ -4,7 +4,7 @@ import "./globals.css";
 
 export const metadata = {
   title: "GridNomad Atlas",
-  description: "Dark premium browser atlas for the GridNomad civilization simulator."
+  description: "Dark premium browser sandbox for watching AI-controlled human groups think, move, and interact."
 };
 
 

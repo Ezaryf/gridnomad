@@ -171,7 +171,8 @@ class OpenAIAPIAdapter:
         self.config = config
 
     def decide(self, agent_context: AgentContext) -> str:
-        if not self.config.api_key:
+        api_key = self.config.api_key or os.environ.get("OPENAI_API_KEY")
+        if not api_key:
             raise RuntimeError("OpenAI API key is missing.")
         try:
             from openai import OpenAI
@@ -179,7 +180,7 @@ class OpenAIAPIAdapter:
             raise RuntimeError("OpenAI SDK is not installed.") from exc
 
         client = OpenAI(
-            api_key=self.config.api_key,
+            api_key=api_key,
             base_url=self.config.base_url or None,
             timeout=self.config.timeout_seconds,
         )
@@ -198,7 +199,8 @@ class AnthropicAPIAdapter:
         self.config = config
 
     def decide(self, agent_context: AgentContext) -> str:
-        if not self.config.api_key:
+        api_key = self.config.api_key or os.environ.get("ANTHROPIC_API_KEY")
+        if not api_key:
             raise RuntimeError("Anthropic API key is missing.")
         try:
             import anthropic
@@ -206,7 +208,7 @@ class AnthropicAPIAdapter:
             raise RuntimeError("Anthropic SDK is not installed.") from exc
 
         client = anthropic.Anthropic(
-            api_key=self.config.api_key,
+            api_key=api_key,
             base_url=self.config.base_url or None,
             timeout=self.config.timeout_seconds,
         )
@@ -230,7 +232,7 @@ class GeminiAPIAdapter:
         self.config = config
 
     def decide(self, agent_context: AgentContext) -> str:
-        api_key = self.config.api_key or self.config.google_api_key
+        api_key = self.config.api_key or self.config.google_api_key or os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
         if not api_key:
             raise RuntimeError("Gemini API key is missing.")
         try:
@@ -259,9 +261,9 @@ class GeminiCLIAdapter:
         if self.config.model:
             command.extend(["-m", self.config.model])
         env_extra = {
-            "GEMINI_API_KEY": self.config.api_key or "",
-            "GOOGLE_API_KEY": self.config.google_api_key or "",
-            "GOOGLE_CLOUD_PROJECT": self.config.google_cloud_project or "",
+            "GEMINI_API_KEY": self.config.api_key or os.environ.get("GEMINI_API_KEY") or "",
+            "GOOGLE_API_KEY": self.config.google_api_key or os.environ.get("GOOGLE_API_KEY") or "",
+            "GOOGLE_CLOUD_PROJECT": self.config.google_cloud_project or os.environ.get("GOOGLE_CLOUD_PROJECT") or "",
         }
         if self.config.use_vertex or self.config.auth_mode == "vertex-ai":
             env_extra["GOOGLE_GENAI_USE_VERTEXAI"] = "true"

@@ -12,17 +12,18 @@ MOVE_DELTAS = {
     "MOVE_WEST": (-1, 0),
 }
 
-MODEL_ACTIONS = set(MOVE_DELTAS) | {
-    "BUILD_BRIDGE",
-    "CONSTRUCT_HOUSE",
-    "DECLARE_WAR",
-    "FORM_ALLIANCE",
-    "VOTE_LEADER",
-    "ATTACK",
-    "ASK_FOR_HELP",
-    "CULTIVATE",
-    "TRADE",
+PRIMITIVE_ACTIONS = {
+    "MOVE",
+    "REST",
+    "INTERACT",
+    "CONSUME",
+    "GATHER",
+    "BUILD",
+    "TRANSFER",
+    "COMMUNICATE",
 }
+
+MODEL_ACTIONS = set(MOVE_DELTAS) | PRIMITIVE_ACTIONS
 
 
 @dataclass(slots=True)
@@ -37,10 +38,11 @@ class ActionRegistry:
         if action in MOVE_DELTAS:
             dx, dy = MOVE_DELTAS[action]
             return EngineAction(
-                kind=action,
+                kind="MOVE",
                 actor_id=actor.id,
                 target_x=actor.x + dx,
                 target_y=actor.y + dy,
+                metadata={"cardinal_action": action},
             )
 
         if action not in MODEL_ACTIONS:
@@ -54,11 +56,11 @@ class ActionRegistry:
                 },
             )
 
-        if action in {"BUILD_BRIDGE", "CONSTRUCT_HOUSE", "CULTIVATE"}:
+        if action == "MOVE":
             target_x, target_y = self._resolve_target_tile(decision, world_state, actor)
-            return EngineAction(kind=action, actor_id=actor.id, target_x=target_x, target_y=target_y)
+            return EngineAction(kind="MOVE", actor_id=actor.id, target_x=target_x, target_y=target_y)
 
-        if action in {"ATTACK", "ASK_FOR_HELP", "TRADE", "VOTE_LEADER"}:
+        if action in {"INTERACT", "TRANSFER"}:
             target_agent = self._resolve_target_agent(decision, world_state, actor)
             return EngineAction(
                 kind=action,
@@ -68,20 +70,9 @@ class ActionRegistry:
                 target_agent_id=None if target_agent is None else target_agent.id,
             )
 
-        if action in {"DECLARE_WAR", "FORM_ALLIANCE"}:
-            target_agent = self._resolve_target_agent(decision, world_state, actor, allow_any_visible=True)
-            target_faction_id = None if target_agent is None else target_agent.faction_id
-            if target_faction_id is None:
-                for candidate in sorted(world_state.factions):
-                    if candidate != actor.faction_id:
-                        target_faction_id = candidate
-                        break
-            return EngineAction(
-                kind=action,
-                actor_id=actor.id,
-                target_agent_id=None if target_agent is None else target_agent.id,
-                target_faction_id=target_faction_id,
-            )
+        if action in {"REST", "CONSUME", "GATHER", "BUILD", "COMMUNICATE"}:
+            target_x, target_y = self._resolve_target_tile(decision, world_state, actor)
+            return EngineAction(kind=action, actor_id=actor.id, target_x=target_x, target_y=target_y)
 
         return EngineAction(kind="NO_OP", actor_id=actor.id, metadata={"reason": "Unhandled action"})
 
@@ -107,8 +98,6 @@ class ActionRegistry:
         decision: DecisionPayload,
         world_state: WorldState,
         actor: AgentState,
-        *,
-        allow_any_visible: bool = False,
     ):
         if decision.target_x is not None and decision.target_y is not None:
             target = world_state.agent_at(decision.target_x, decision.target_y, exclude_agent_id=actor.id)
@@ -117,8 +106,7 @@ class ActionRegistry:
         nearby = world_state.nearby_agents(
             actor.x, actor.y, self.perception_radius, exclude_agent_id=actor.id
         )
-        if not allow_any_visible:
-            nearby = [candidate for candidate in nearby if abs(candidate.x - actor.x) + abs(candidate.y - actor.y) <= 1]
+        nearby = [candidate for candidate in nearby if abs(candidate.x - actor.x) + abs(candidate.y - actor.y) <= 1]
         return nearby[0] if nearby else None
 
     def intent_from_decision(self, decision: DecisionPayload) -> IntentState:

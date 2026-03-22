@@ -25,10 +25,11 @@ class GenerationTests(unittest.TestCase):
         bundle = load_scenario(scenario, seed_override=99, width_override=48, height_override=48)
         world = bundle.world
 
-        self.assertGreaterEqual(len(world.settlements), len(world.factions))
+        self.assertGreaterEqual(len(world.settlements), 1)
         self.assertTrue(any(tile["kind"] == "river-trace" for tile in world.props))
-        self.assertEqual(set(world.kingdoms), set(world.factions))
-        self.assertGreaterEqual(len(world.cities), len(world.factions))
+        self.assertEqual(world.kingdoms, {})
+        self.assertEqual(world.cities, {})
+        self.assertEqual(world.animals, {})
 
         for settlement in world.settlements:
             tile = world.get_tile(settlement["x"], settlement["y"])

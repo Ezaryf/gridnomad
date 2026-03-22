@@ -41,7 +41,7 @@ export async function GET(request) {
       supports_model_listing: true,
       supports_manual_model_entry: true,
       auth_status: "api-key-required",
-      login_hint: "Enter a Gemini API key to let this provider control the kingdom."
+      login_hint: "Enter a Gemini API key to let this provider control the group."
     });
   }
 
@@ -53,7 +53,7 @@ export async function GET(request) {
       supports_model_listing: true,
       supports_manual_model_entry: true,
       auth_status: "api-key-required",
-      login_hint: "Enter an OpenAI API key to let this provider control the kingdom."
+      login_hint: "Enter an OpenAI API key to let this provider control the group."
     });
   }
 
@@ -65,7 +65,7 @@ export async function GET(request) {
       supports_model_listing: true,
       supports_manual_model_entry: true,
       auth_status: "api-key-required",
-      login_hint: "Enter an Anthropic API key to let this provider control the kingdom."
+      login_hint: "Enter an Anthropic API key to let this provider control the group."
     });
   }
 

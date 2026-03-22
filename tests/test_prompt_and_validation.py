@@ -21,14 +21,15 @@ class PromptAndValidationTests(unittest.TestCase):
                 "civilization": ["Ada to red council: I found a ford."],
                 "diplomacy": ["Bo to red: We can trade at dawn."]
             },
-            "Norm 'River Pact' (75): help build bridges.",
+            "Share food, stay together, and keep exploring the river path carefully.",
         )
         self.assertIn("You are Ada", prompt)
-        self.assertIn("River Pact", prompt)
+        self.assertIn("Share food", prompt)
         self.assertIn("shared food", prompt)
         self.assertIn("Built a bridge yesterday", prompt)
         self.assertIn("I found a ford", prompt)
-        self.assertIn("MOVE_NORTH / MOVE_SOUTH / MOVE_EAST / MOVE_WEST", prompt)
+        self.assertIn("MOVE", prompt)
+        self.assertIn("INTERACT", prompt)
 
     def test_parse_decision_payload_clamps_state_values_and_captures_unknown_action(self) -> None:
         raw = json.dumps(
@@ -37,6 +38,8 @@ class PromptAndValidationTests(unittest.TestCase):
                 "target_x": None,
                 "target_y": None,
                 "reason": "I want to celebrate.",
+                "intent": "celebrate with the people near me",
+                "speech": "Come celebrate with me.",
                 "updated_emotions": {
                     "Joy": 99,
                     "Sadness": -5,
@@ -67,6 +70,8 @@ class PromptAndValidationTests(unittest.TestCase):
         self.assertIsNotNone(decision.action_proposal)
         self.assertEqual(decision.action_proposal.name, "DANCE")
         self.assertEqual(decision.outbound_message.text, "Celebrate with me.")
+        self.assertEqual(decision.intent, "celebrate with the people near me")
+        self.assertEqual(decision.speech, "Come celebrate with me.")
 
     def test_action_registry_returns_noop_for_unknown_action(self) -> None:
         agent = build_agent("ada", "red", 1, 1)
@@ -78,6 +83,8 @@ class PromptAndValidationTests(unittest.TestCase):
                     "target_x": None,
                     "target_y": None,
                     "reason": "A novel artistic ritual.",
+                    "intent": "make the sky feel ceremonial for everyone nearby",
+                    "speech": "",
                     "updated_emotions": {
                         "Joy": 5,
                         "Sadness": 1,
