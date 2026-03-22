@@ -370,7 +370,8 @@ class Simulation:
                 faction_id=actor.faction_id,
             )
         tile.terrain = TileType.BRIDGE
-        tile.owner_faction_id = actor.faction_id
+        tile.owner_faction = actor.faction_id
+        tile.feature = "bridge"
         actor.inventory.wood -= 2
         actor.last_action_success = True
         return self._event(
@@ -396,7 +397,7 @@ class Simulation:
             )
         tile = self.world.get_tile(target_x, target_y)
         adjacent = abs(target_x - actor.x) + abs(target_y - actor.y) <= 1
-        if not adjacent or tile.terrain == TileType.WATER or actor.inventory.wood < 2 or actor.inventory.stone < 1:
+        if not adjacent or not tile.buildable or actor.inventory.wood < 2 or actor.inventory.stone < 1:
             actor.last_action_success = False
             return self._event(
                 kind="CONSTRUCT_HOUSE",
@@ -406,7 +407,8 @@ class Simulation:
                 faction_id=actor.faction_id,
             )
         tile.terrain = TileType.HOUSE
-        tile.owner_faction_id = actor.faction_id
+        tile.owner_faction = actor.faction_id
+        tile.feature = "homestead"
         actor.inventory.wood -= 2
         actor.inventory.stone -= 1
         actor.last_action_success = True
@@ -441,7 +443,8 @@ class Simulation:
                 faction_id=actor.faction_id,
             )
         tile.terrain = TileType.FARM
-        tile.owner_faction_id = actor.faction_id
+        tile.owner_faction = actor.faction_id
+        tile.feature = "field"
         tile.farm_progress = 0
         actor.last_action_success = True
         return self._event(

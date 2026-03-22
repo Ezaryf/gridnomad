@@ -20,6 +20,7 @@ out/
 # Project-specific
 runs/
 data/cli-runtime/
+.cli-runtime/
 plan/*
 !.plan/.gitkeep
 

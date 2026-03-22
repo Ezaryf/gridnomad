@@ -282,8 +282,14 @@ class TileState:
     terrain: TileType = TileType.PLAIN
     farmable: bool = False
     resource: str | None = None
-    owner_faction_id: str | None = None
+    owner_faction: str | None = None
     farm_progress: int = 0
+    biome: str = "grassland"
+    elevation: int = 0
+    moisture: int = 0
+    feature: str | None = None
+    region_id: str | None = None
+    settlement_id: str | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "TileState":
@@ -291,29 +297,63 @@ class TileState:
             terrain=TileType(data.get("terrain", TileType.PLAIN)),
             farmable=bool(data.get("farmable", False)),
             resource=data.get("resource"),
-            owner_faction_id=data.get("owner_faction_id"),
+            owner_faction=data.get("owner_faction", data.get("owner_faction_id")),
             farm_progress=require_int("farm_progress", data.get("farm_progress", 0), 0),
+            biome=str(data.get("biome", "grassland")),
+            elevation=require_int("elevation", data.get("elevation", 0), 0, 100, clamp=True),
+            moisture=require_int("moisture", data.get("moisture", 0), 0, 100, clamp=True),
+            feature=data.get("feature"),
+            region_id=data.get("region_id"),
+            settlement_id=data.get("settlement_id"),
         )
 
     @property
     def passable(self) -> bool:
-        return self.terrain != TileType.WATER
+        return self.terrain != TileType.WATER and self.feature not in {"mountain", "cliff"}
+
+    @property
+    def buildable(self) -> bool:
+        return self.passable and self.feature not in {"mountain", "cliff", "landmark"}
 
     def describe(self) -> str:
-        bits = [self.terrain.value]
+        bits: list[str] = []
+        if self.terrain == TileType.WATER and self.feature == "river":
+            bits.append("river")
+        elif self.terrain == TileType.WATER:
+            bits.append(self.biome or "water")
+        elif self.terrain == TileType.BRIDGE:
+            bits.append("bridge")
+        elif self.terrain == TileType.HOUSE:
+            bits.append("house")
+        elif self.terrain == TileType.FARM:
+            bits.append("farm")
+        elif self.feature:
+            bits.append(self.feature)
+        else:
+            bits.append(self.biome or "plain")
+        if self.biome and self.biome not in bits:
+            bits.append(self.biome)
         if self.resource:
             bits.append(self.resource)
         if self.farmable and self.terrain == TileType.PLAIN:
             bits.append("farmable")
-        return " ".join(bits)
+        if self.settlement_id:
+            bits.append("settlement")
+        return " ".join(dict.fromkeys(bits))
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "terrain": self.terrain.value,
             "farmable": self.farmable,
             "resource": self.resource,
-            "owner_faction_id": self.owner_faction_id,
+            "owner_faction": self.owner_faction,
             "farm_progress": self.farm_progress,
+            "biome": self.biome,
+            "elevation": self.elevation,
+            "moisture": self.moisture,
+            "feature": self.feature,
+            "region_id": self.region_id,
+            "settlement_id": self.settlement_id,
         }
 
 
@@ -321,6 +361,7 @@ class TileState:
 class FactionState:
     id: str
     name: str
+    banner_color: str | None = None
     leader_id: str | None = None
     alliances: set[str] = field(default_factory=set)
     wars: set[str] = field(default_factory=set)
@@ -330,6 +371,7 @@ class FactionState:
         return cls(
             id=data["id"],
             name=data.get("name", data["id"].title()),
+            banner_color=data.get("banner_color", data.get("color")),
             leader_id=data.get("leader_id"),
             alliances=set(data.get("alliances", [])),
             wars=set(data.get("wars", [])),
@@ -339,6 +381,7 @@ class FactionState:
         return {
             "id": self.id,
             "name": self.name,
+            "banner_color": self.banner_color,
             "leader_id": self.leader_id,
             "alliances": sorted(self.alliances),
             "wars": sorted(self.wars),
@@ -430,6 +473,14 @@ class SimulationConfig:
     thought_memory_limit: int = 30
     event_memory_limit: int = 30
     reason_interval: int = 5
+    world_seed: int = 0
+    generator_preset: str = "grand-continent"
+    map_width: int | None = None
+    map_height: int | None = None
+    coastline_bias: int = 54
+    river_count: int = 7
+    settlement_density: int = 18
+    landmark_density: int = 14
 
     def __post_init__(self) -> None:
         self.width = require_int("width", self.width, 1)
@@ -439,17 +490,36 @@ class SimulationConfig:
         self.thought_memory_limit = require_int("thought_memory_limit", self.thought_memory_limit, 1)
         self.event_memory_limit = require_int("event_memory_limit", self.event_memory_limit, 1)
         self.reason_interval = require_int("reason_interval", self.reason_interval, 1)
+        self.world_seed = require_int("world_seed", self.world_seed)
+        self.map_width = self.width if self.map_width is None else require_int("map_width", self.map_width, 1)
+        self.map_height = self.height if self.map_height is None else require_int("map_height", self.map_height, 1)
+        self.coastline_bias = require_int("coastline_bias", self.coastline_bias, 0, 100, clamp=True)
+        self.river_count = require_int("river_count", self.river_count, 0, 64, clamp=True)
+        self.settlement_density = require_int(
+            "settlement_density", self.settlement_density, 1, 100, clamp=True
+        )
+        self.landmark_density = require_int(
+            "landmark_density", self.landmark_density, 0, 100, clamp=True
+        )
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "SimulationConfig":
         return cls(
-            width=data["width"],
-            height=data["height"],
+            width=data.get("map_width", data["width"]),
+            height=data.get("map_height", data["height"]),
             perception_radius=data.get("perception_radius", 2),
             snapshot_interval=data.get("snapshot_interval", 10),
             thought_memory_limit=data.get("thought_memory_limit", 30),
             event_memory_limit=data.get("event_memory_limit", 30),
             reason_interval=data.get("reason_interval", 5),
+            world_seed=data.get("world_seed", data.get("seed", 0)),
+            generator_preset=data.get("generator_preset", "grand-continent"),
+            map_width=data.get("map_width", data.get("width")),
+            map_height=data.get("map_height", data.get("height")),
+            coastline_bias=data.get("coastline_bias", 54),
+            river_count=data.get("river_count", 7),
+            settlement_density=data.get("settlement_density", 18),
+            landmark_density=data.get("landmark_density", 14),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -461,6 +531,14 @@ class SimulationConfig:
             "thought_memory_limit": self.thought_memory_limit,
             "event_memory_limit": self.event_memory_limit,
             "reason_interval": self.reason_interval,
+            "world_seed": self.world_seed,
+            "generator_preset": self.generator_preset,
+            "map_width": self.map_width,
+            "map_height": self.map_height,
+            "coastline_bias": self.coastline_bias,
+            "river_count": self.river_count,
+            "settlement_density": self.settlement_density,
+            "landmark_density": self.landmark_density,
         }
 
 
@@ -473,6 +551,11 @@ class WorldState:
     factions: dict[str, FactionState]
     tick: int = 0
     seed: int = 0
+    props: list[dict[str, Any]] = field(default_factory=list)
+    regions: dict[str, dict[str, Any]] = field(default_factory=dict)
+    settlements: list[dict[str, Any]] = field(default_factory=list)
+    roads: list[dict[str, Any]] = field(default_factory=list)
+    territories: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def in_bounds(self, x: int, y: int) -> bool:
         return 0 <= x < self.width and 0 <= y < self.height
@@ -525,6 +608,13 @@ class WorldState:
             "factions": {
                 faction_id: faction.to_dict()
                 for faction_id, faction in sorted(self.factions.items())
+            },
+            "props": list(self.props),
+            "regions": {region_id: dict(payload) for region_id, payload in sorted(self.regions.items())},
+            "settlements": [dict(settlement) for settlement in self.settlements],
+            "roads": [dict(road) for road in self.roads],
+            "territories": {
+                faction_id: dict(payload) for faction_id, payload in sorted(self.territories.items())
             },
         }
 

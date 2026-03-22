@@ -7,7 +7,7 @@ export async function GET() {
   const [scenario, settings] = await Promise.all([readScenario(), readSettings()]);
   return NextResponse.json({
     scenario,
-    preview: buildScenarioPreview(scenario),
+    preview: scenario.generator ? null : buildScenarioPreview(scenario),
     settings
   });
 }

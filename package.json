@@ -7,8 +7,23 @@
     "start": "next start"
   },
   "dependencies": {
+    "@fontsource/manrope": "^5.2.8",
+    "@radix-ui/react-dialog": "^1.1.15",
+    "@radix-ui/react-scroll-area": "^1.2.10",
+    "@radix-ui/react-select": "^2.2.6",
+    "@radix-ui/react-separator": "^1.1.8",
+    "@radix-ui/react-slot": "^1.2.4",
+    "@radix-ui/react-tabs": "^1.1.13",
+    "@tailwindcss/postcss": "^4.2.2",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.577.0",
     "next": "latest",
+    "postcss": "^8.5.8",
+    "pyright": "^1.1.408",
     "react": "latest",
-    "react-dom": "latest"
+    "react-dom": "latest",
+    "tailwind-merge": "^3.5.0",
+    "tailwindcss": "^4.2.2"
   }
 }

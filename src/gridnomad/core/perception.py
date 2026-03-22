@@ -25,6 +25,8 @@ def build_perception(world: WorldState, agent: AgentState, radius: int) -> Perce
     nearby_water: list[tuple[int, int]] = []
     nearby_farmable: list[tuple[int, int]] = []
 
+    common_biomes = {"grassland", "meadow", "island-grass", "orchard", "high-pasture", "vale"}
+
     for y in range(world.height):
         for x in range(world.width):
             distance = abs(x - agent.x) + abs(y - agent.y)
@@ -32,7 +34,7 @@ def build_perception(world: WorldState, agent: AgentState, radius: int) -> Perce
                 continue
             tile = world.get_tile(x, y)
             relation = direction_from_delta(x - agent.x, y - agent.y)
-            if tile.terrain != TileType.PLAIN or tile.resource or tile.farmable:
+            if tile.terrain != TileType.PLAIN or tile.resource or tile.farmable or tile.feature or tile.biome not in common_biomes:
                 description = tile.describe()
                 points.append(f"{description} {relation}")
                 signature_parts.append(f"tile:{x},{y}:{description}")

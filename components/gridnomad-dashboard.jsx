@@ -1,127 +1,159 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { Radar, Waves } from "lucide-react";
+
+import AtlasMetrics from "@/components/atlas-metrics";
+import CivilizationSettingsSheet from "@/components/civilization-settings-sheet";
+import InspectorTabs from "@/components/inspector-tabs";
+import PixelWorldMap from "@/components/pixel-world-map";
+import WorldToolbar from "@/components/world-toolbar";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 
-const PROVIDER_OPTIONS = [
-  { value: "heuristic", label: "Heuristic" },
-  { value: "gemini-cli", label: "Gemini CLI" },
-  { value: "opencode", label: "OpenCode CLI" }
+const PRESET_OPTIONS = [
+  { value: "grand-continent", label: "Grand Continent" },
+  { value: "archipelago", label: "Archipelago" },
+  { value: "highland-realms", label: "Highland Realms" }
 ];
 
-const GEMINI_MODELS = ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash-exp"];
 
-
-function toBoardData(preview, snapshot) {
-  if (snapshot?.world) {
-    const world = snapshot.world;
-    const agents = Object.values(world.agents ?? {});
-    return {
-      width: world.width,
-      height: world.height,
-      tiles: world.tiles,
-      agents
-    };
-  }
-  return preview ?? { width: 0, height: 0, tiles: [], agents: [] };
-}
-
-
-function tileTone(terrain) {
-  switch (terrain) {
-    case "water":
-      return "water";
-    case "bridge":
-      return "bridge";
-    case "farm":
-      return "farm";
-    case "house":
-      return "house";
-    default:
-      return "plain";
-  }
-}
-
-
-function terrainLabel(tile) {
-  if (tile.resource) {
-    return tile.resource.slice(0, 3).toUpperCase();
-  }
-  if (tile.farmable && tile.terrain === "plain") {
-    return "SOIL";
-  }
-  return tile.terrain.slice(0, 3).toUpperCase();
-}
-
-
-function toAgentMap(agents) {
-  const map = new Map();
-  for (const agent of agents) {
-    const key = `${agent.x},${agent.y}`;
-    if (!map.has(key)) {
-      map.set(key, []);
-    }
-    map.get(key).push(agent);
-  }
-  return map;
-}
+const SIZE_OPTIONS = [
+  { value: 96, label: "96 x 96" },
+  { value: 128, label: "128 x 128" },
+  { value: 160, label: "160 x 160" }
+];
 
 
 export default function GridNomadDashboard() {
   const [scenario, setScenario] = useState(null);
-  const [preview, setPreview] = useState(null);
-  const [settings, setSettings] = useState({ factions: {} });
+  const [settings, setSettings] = useState({ world: {}, factions: {} });
+  const [fallbackPreview, setFallbackPreview] = useState(null);
+  const [generatedPayload, setGeneratedPayload] = useState(null);
   const [snapshot, setSnapshot] = useState(null);
   const [events, setEvents] = useState([]);
+  const [hoveredTile, setHoveredTile] = useState(null);
+  const [selectedTile, setSelectedTile] = useState(null);
   const [opencodeModels, setOpencodeModels] = useState({});
   const [opencodeCredentials, setOpencodeCredentials] = useState([]);
-  const [statusMessage, setStatusMessage] = useState("Loading GridNomad control room...");
-  const [ticks, setTicks] = useState(12);
-  const [isPending, startTransition] = useTransition();
+  const [statusMessage, setStatusMessage] = useState("Booting the OLED atlas...");
+  const [ticks, setTicks] = useState(18);
+  const [loadingWorld, setLoadingWorld] = useState(false);
+  const [runningSimulation, setRunningSimulation] = useState(false);
+  const [savingSettings, setSavingSettings] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsTab, setSettingsTab] = useState("world");
+  const [overlays, setOverlays] = useState({
+    territories: true,
+    resources: false,
+    agents: true
+  });
 
   useEffect(() => {
-    startTransition(async () => {
-      const [settingsResponse, statusResponse] = await Promise.all([
-        fetch("/api/settings"),
-        fetch("/api/providers/opencode/status")
-      ]);
-      const settingsPayload = await settingsResponse.json();
-      const statusPayload = await statusResponse.json();
-      setScenario(settingsPayload.scenario);
-      setPreview(settingsPayload.preview);
-      setSettings(settingsPayload.settings);
-      setOpencodeCredentials(statusPayload.credentials ?? []);
-      setStatusMessage("Control room ready. Configure each civilization, then run the world.");
-    });
+    let cancelled = false;
+    async function bootstrap() {
+      try {
+        const [settingsResponse, statusResponse] = await Promise.all([
+          fetch("/api/settings"),
+          fetch("/api/providers/opencode/status")
+        ]);
+        const settingsPayload = await settingsResponse.json();
+        const statusPayload = await statusResponse.json();
+        if (cancelled) {
+          return;
+        }
+        setScenario(settingsPayload.scenario);
+        setFallbackPreview(settingsPayload.preview);
+        setSettings(settingsPayload.settings);
+        setOpencodeCredentials(statusPayload.credentials ?? []);
+        await requestGeneratedWorld(settingsPayload.settings, {
+          nextStatus: "Atlas ready. Generate the world or run the current civilizations."
+        });
+      } catch (error) {
+        if (!cancelled) {
+          setStatusMessage(`GridNomad could not finish booting: ${error.message}`);
+        }
+      }
+    }
+    bootstrap();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  const board = useMemo(() => toBoardData(preview, snapshot), [preview, snapshot]);
-  const agentMap = useMemo(() => toAgentMap(board.agents ?? []), [board]);
-  const factions = scenario?.factions ?? [];
-  const aliveAgents = board.agents?.filter((agent) => agent.alive !== false).length ?? 0;
-  const allTiles = board.tiles.flat?.() ?? [];
-  const bridgeCount = allTiles.filter((tile) => tile.terrain === "bridge").length;
-  const farmCount = allTiles.filter((tile) => tile.terrain === "farm").length;
+  const activeWorld = snapshot?.world ?? generatedPayload?.world ?? fallbackPreview;
+  const activeTile = selectedTile ?? hoveredTile;
+  const inspector = useMemo(() => buildTileInsight(activeWorld, activeTile), [activeTile, activeWorld]);
+  const metrics = useMemo(() => buildMetrics(activeWorld, settings.world?.seed), [activeWorld, settings.world?.seed]);
+  const territorySummary = useMemo(
+    () => describeTerritory(activeWorld, inspector?.tile.owner_faction),
+    [activeWorld, inspector]
+  );
 
-  async function saveSettings(nextSettings = settings) {
-    const response = await fetch("/api/settings", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(nextSettings)
-    });
-    const payload = await response.json();
-    setSettings(payload.settings);
-    setStatusMessage("Civilization settings saved.");
+  async function requestGeneratedWorld(nextSettings = settings, { nextStatus } = {}) {
+    setLoadingWorld(true);
+    setStatusMessage("Generating the world through the Python engine...");
+    setSnapshot(null);
+    setEvents([]);
+    setSelectedTile(null);
+    try {
+      const response = await fetch("/api/worlds/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ settings: nextSettings })
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.ok) {
+        setStatusMessage(`World generation failed. ${payload.stderr || payload.stdout || "Unknown error."}`);
+        return;
+      }
+      setSettings(nextSettings);
+      setGeneratedPayload(payload);
+      setStatusMessage(
+        nextStatus ?? `Generated world ${payload.world.width} x ${payload.world.height} from seed ${payload.world.seed}.`
+      );
+    } finally {
+      setLoadingWorld(false);
+    }
+  }
+
+  async function saveSettings(nextSettings = settings, { message = "Settings saved." } = {}) {
+    setSavingSettings(true);
+    try {
+      const response = await fetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(nextSettings)
+      });
+      const payload = await response.json();
+      setSettings(payload.settings);
+      setStatusMessage(message);
+      return payload.settings;
+    } finally {
+      setSavingSettings(false);
+    }
   }
 
   function updateFaction(factionId, patch) {
     setSettings((current) => ({
+      ...current,
       factions: {
         ...current.factions,
         [factionId]: {
           ...current.factions[factionId],
           ...patch
         }
+      }
+    }));
+  }
+
+  function updateWorld(patch) {
+    setSettings((current) => ({
+      ...current,
+      world: {
+        ...current.world,
+        ...patch
       }
     }));
   }
@@ -134,8 +166,8 @@ export default function GridNomadDashboard() {
     setOpencodeModels((current) => ({ ...current, [factionId]: payload.models ?? [] }));
     setStatusMessage(
       payload.models?.length
-        ? `Loaded ${payload.models.length} OpenCode model options for ${factionId}.`
-        : "OpenCode model list returned no entries. Check CLI connectivity or login state."
+        ? `Loaded ${payload.models.length} OpenCode models for ${factionLabel(scenario, factionId)}.`
+        : "OpenCode model list returned no entries. Check login state and CLI availability."
     );
   }
 
@@ -154,8 +186,9 @@ export default function GridNomadDashboard() {
   }
 
   async function runSimulation() {
-    startTransition(async () => {
-      setStatusMessage("Running the simulation through the Python engine...");
+    setRunningSimulation(true);
+    setStatusMessage("Running the current world through the simulator...");
+    try {
       const response = await fetch("/api/simulations/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -169,278 +202,219 @@ export default function GridNomadDashboard() {
       setSnapshot(payload.snapshot);
       setEvents(payload.events ?? []);
       setStatusMessage(`Simulation complete. Loaded ${payload.events?.length ?? 0} events from ${payload.runDir}.`);
+    } finally {
+      setRunningSimulation(false);
+    }
+  }
+
+  async function randomizeSeed() {
+    const nextSeed = Math.floor(Math.random() * 900000) + 100000;
+    const nextSettings = {
+      ...settings,
+      world: {
+        ...settings.world,
+        seed: nextSeed
+      }
+    };
+    setSettings(nextSettings);
+    await requestGeneratedWorld(nextSettings, {
+      nextStatus: `Generated a new world from seed ${nextSeed}.`
     });
   }
 
+  async function copySeed() {
+    const seed = settings.world?.seed;
+    if (!seed || typeof navigator === "undefined" || !navigator.clipboard) {
+      setStatusMessage("Clipboard access is unavailable in this environment.");
+      return;
+    }
+    await navigator.clipboard.writeText(String(seed));
+    setStatusMessage(`Copied seed ${seed} to your clipboard.`);
+  }
+
+  function openSettingsPanel(tab) {
+    setSettingsTab(tab);
+    setSettingsOpen(true);
+  }
+
+  const busy = loadingWorld || runningSimulation || savingSettings;
+
   return (
-    <main className="control-room">
-      <section className="hero">
-        <div className="hero-copy">
-          <p className="eyebrow">GridNomad</p>
-          <h1>Control Room for Browser-Driven Civilizations</h1>
-          <p className="lede">
-            Launch the simulator in the browser, assign a different AI stack to each civilization,
-            and route faction decisions through heuristic logic, Gemini CLI, or OpenCode CLI.
-          </p>
-        </div>
-        <div className="hero-metrics">
-          <MetricCard label="Alive Agents" value={aliveAgents} />
-          <MetricCard label="Bridges" value={bridgeCount} />
-          <MetricCard label="Farms" value={farmCount} />
-          <MetricCard label="Ticks Ready" value={ticks} />
-        </div>
-      </section>
+    <main className="min-h-screen bg-background text-foreground">
+      <div className="mx-auto flex w-full max-w-[1900px] flex-col gap-4 px-4 py-4 sm:px-6 sm:py-6">
+        <WorldToolbar
+          worldSettings={settings.world ?? {}}
+          ticks={ticks}
+          presetOptions={PRESET_OPTIONS}
+          sizeOptions={SIZE_OPTIONS}
+          statusMessage={statusMessage}
+          overlays={overlays}
+          busy={busy}
+          onSeedChange={(value) => updateWorld({ seed: value })}
+          onPresetChange={(value) => updateWorld({ generatorPreset: value })}
+          onSizeChange={(value) => updateWorld({ width: value, height: value })}
+          onTicksChange={setTicks}
+          onToggleOverlay={(key) =>
+            setOverlays((current) => ({
+              ...current,
+              [key]: !current[key]
+            }))
+          }
+          onRandomizeSeed={randomizeSeed}
+          onCopySeed={copySeed}
+          onGenerateWorld={() => requestGeneratedWorld()}
+          onRunSimulation={runSimulation}
+          onOpenWorldSettings={() => openSettingsPanel("world")}
+          onOpenCivilizations={() => openSettingsPanel("civilizations")}
+        />
 
-      <section className="command-bar panel">
-        <div>
-          <h2>Run the World</h2>
-          <p>Use the Python engine underneath and bring the latest snapshot back into the browser.</p>
-        </div>
-        <label className="stacked">
-          <span>Ticks to simulate</span>
-          <input
-            type="number"
-            min="1"
-            max="500"
-            value={ticks}
-            onChange={(event) => setTicks(Number(event.target.value))}
-          />
-        </label>
-        <div className="button-row">
-          <button className="action" type="button" onClick={() => saveSettings()} disabled={isPending}>
-            Save civilization settings
-          </button>
-          <button className="action emphasis" type="button" onClick={runSimulation} disabled={isPending}>
-            {isPending ? "Running..." : "Run simulation"}
-          </button>
-        </div>
-        <p className="status">{statusMessage}</p>
-      </section>
+        <AtlasMetrics metrics={metrics} />
 
-      <section className="layout-grid">
-        <div className="panel world-panel">
-          <div className="panel-heading">
-            <div>
-              <h2>World View</h2>
-              <p>Initial board comes from the scenario. After a run, this switches to the latest Python snapshot.</p>
-            </div>
-            <div className="legend">
-              <span className="legend-chip plain">Plain</span>
-              <span className="legend-chip water">Water</span>
-              <span className="legend-chip bridge">Bridge</span>
-              <span className="legend-chip farm">Farm</span>
-              <span className="legend-chip house">House</span>
-            </div>
-          </div>
-          <div
-            className="world-grid"
-            style={{ gridTemplateColumns: `repeat(${board.width || 1}, minmax(0, 1fr))` }}
-          >
-            {(board.tiles ?? []).flat().map((tile) => {
-              const agentsHere = agentMap.get(`${tile.x},${tile.y}`) ?? [];
-              return (
-                <div key={`${tile.x}-${tile.y}`} className={`world-tile ${tileTone(tile.terrain)}`}>
-                  <span className="tile-label">{terrainLabel(tile)}</span>
-                  {agentsHere.length > 0 ? (
-                    <div className="tile-agents">
-                      {agentsHere.map((agent) => (
-                        <span key={agent.id} className={`agent-pill faction-${agent.faction_id}`}>
-                          {agent.name.slice(0, 2).toUpperCase()}
-                        </span>
-                      ))}
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_390px]">
+          <div className="space-y-4">
+            <Card className="overflow-hidden bg-[linear-gradient(180deg,rgba(255,255,255,0.03),rgba(255,255,255,0.015))]">
+              <CardHeader className="border-b border-white/8 pb-4">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <Badge>World stage</Badge>
+                      {snapshot ? <Badge variant="muted">Tick {snapshot.tick}</Badge> : <Badge variant="muted">Preview</Badge>}
                     </div>
-                  ) : null}
+                    <CardTitle className="text-xl">Immersive seeded overworld</CardTitle>
+                    <CardDescription>
+                      The colorful pixel map stays vivid inside a pure-black UI shell with quieter chrome and cleaner controls.
+                    </CardDescription>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <MapMeta icon={Waves} label={`${activeWorld?.roads?.length ?? 0} roads`} />
+                    <MapMeta icon={Radar} label={`${activeWorld?.settlements?.length ?? 0} settlements`} />
+                  </div>
                 </div>
-              );
-            })}
+              </CardHeader>
+              <CardContent className="p-3 sm:p-4">
+                <PixelWorldMap
+                  world={activeWorld}
+                  overlays={overlays}
+                  selectedTile={selectedTile}
+                  onHoverTile={setHoveredTile}
+                  onSelectTile={setSelectedTile}
+                />
+              </CardContent>
+            </Card>
           </div>
+
+          <InspectorTabs
+            scenario={scenario}
+            inspector={inspector}
+            events={events}
+            territorySummary={territorySummary}
+          />
         </div>
+      </div>
 
-        <div className="panel events-panel">
-          <div className="panel-heading">
-            <div>
-              <h2>Event Feed</h2>
-              <p>Recent world actions and cultural changes from the latest browser-triggered run.</p>
-            </div>
-          </div>
-          <div className="events-list">
-            {events.length === 0 ? (
-              <p className="empty-state">Run the simulation to populate the live event feed.</p>
-            ) : (
-              events.slice(-14).reverse().map((event, index) => (
-                <article key={`${event.tick}-${index}`} className={`event-card ${event.success ? "success" : "warn"}`}>
-                  <div className="event-meta">
-                    <span>Tick {event.tick}</span>
-                    <span>{event.kind}</span>
-                  </div>
-                  <p>{event.description}</p>
-                </article>
-              ))
-            )}
-          </div>
-        </div>
-      </section>
-
-      <section className="panel settings-panel">
-        <div className="panel-heading">
-          <div>
-            <h2>Civilization AI Settings</h2>
-            <p>Each civilization can run on a separate provider, model, and credential path.</p>
-          </div>
-          <div className="button-row">
-            <button className="secondary" type="button" onClick={refreshOpencodeStatus}>
-              Refresh OpenCode credentials
-            </button>
-            <button className="secondary" type="button" onClick={() => launchProviderLogin("gemini-cli")}>
-              Launch Gemini login
-            </button>
-          </div>
-        </div>
-        <p className="credential-note">
-          OpenCode credentials detected locally: {opencodeCredentials.length ? opencodeCredentials.join(", ") : "none yet"}
-        </p>
-        <div className="faction-grid">
-          {factions.map((faction) => {
-            const config = settings.factions?.[faction.id] ?? {};
-            const models = opencodeModels[faction.id] ?? [];
-            return (
-              <article key={faction.id} className={`faction-card faction-${faction.id}`}>
-                <header>
-                  <p className="eyebrow">Civilization</p>
-                  <h3>{faction.name}</h3>
-                  <p>{faction.culture?.[0]?.description ?? "No seeded culture description."}</p>
-                </header>
-
-                <label className="stacked">
-                  <span>Provider</span>
-                  <select
-                    value={config.provider ?? "heuristic"}
-                    onChange={(event) => updateFaction(faction.id, { provider: event.target.value })}
-                  >
-                    {PROVIDER_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-
-                {config.provider === "gemini-cli" ? (
-                  <>
-                    <label className="stacked">
-                      <span>Auth mode</span>
-                      <select
-                        value={config.authMode ?? "existing-cli-auth"}
-                        onChange={(event) => updateFaction(faction.id, { authMode: event.target.value })}
-                      >
-                        <option value="existing-cli-auth">Existing CLI login</option>
-                        <option value="gemini-api-key">Gemini API key</option>
-                        <option value="vertex-ai">Vertex AI</option>
-                      </select>
-                    </label>
-                    <label className="stacked">
-                      <span>Model</span>
-                      <input
-                        list={`gemini-models-${faction.id}`}
-                        value={config.model ?? ""}
-                        onChange={(event) => updateFaction(faction.id, { model: event.target.value })}
-                        placeholder="gemini-2.5-flash"
-                      />
-                      <datalist id={`gemini-models-${faction.id}`}>
-                        {GEMINI_MODELS.map((model) => (
-                          <option key={model} value={model} />
-                        ))}
-                      </datalist>
-                    </label>
-                    <label className="stacked">
-                      <span>Gemini API key</span>
-                      <input
-                        type="password"
-                        value={config.apiKey ?? ""}
-                        onChange={(event) => updateFaction(faction.id, { apiKey: event.target.value })}
-                        placeholder="Optional if CLI login is already configured"
-                      />
-                    </label>
-                    <label className="stacked">
-                      <span>Google Cloud project</span>
-                      <input
-                        value={config.googleCloudProject ?? ""}
-                        onChange={(event) => updateFaction(faction.id, { googleCloudProject: event.target.value })}
-                        placeholder="Needed for some paid/org Gemini setups"
-                      />
-                    </label>
-                  </>
-                ) : null}
-
-                {config.provider === "opencode" ? (
-                  <>
-                    <div className="button-row">
-                      <button className="secondary" type="button" onClick={() => launchProviderLogin("opencode")}>
-                        Launch OpenCode login
-                      </button>
-                      <button className="secondary" type="button" onClick={() => refreshOpencodeModels(faction.id)}>
-                        Refresh model list
-                      </button>
-                    </div>
-                    <label className="stacked">
-                      <span>Provider filter</span>
-                      <input
-                        value={config.opencodeProvider ?? ""}
-                        onChange={(event) => updateFaction(faction.id, { opencodeProvider: event.target.value })}
-                        placeholder="Optional provider id for opencode models"
-                      />
-                    </label>
-                    <label className="stacked">
-                      <span>OpenCode model</span>
-                      <select
-                        value={config.model ?? ""}
-                        onChange={(event) => updateFaction(faction.id, { model: event.target.value })}
-                      >
-                        <option value="">Choose a model</option>
-                        {models.map((model) => (
-                          <option key={model} value={model}>
-                            {model}
-                          </option>
-                        ))}
-                        {config.model && !models.includes(config.model) ? (
-                          <option value={config.model}>{config.model}</option>
-                        ) : null}
-                      </select>
-                    </label>
-                    <label className="stacked">
-                      <span>CLI home override</span>
-                      <input
-                        value={config.cliHome ?? ""}
-                        onChange={(event) => updateFaction(faction.id, { cliHome: event.target.value })}
-                        placeholder="Optional isolated OpenCode runtime path"
-                      />
-                    </label>
-                  </>
-                ) : null}
-
-                {config.provider === "heuristic" ? (
-                  <div className="provider-note">
-                    <p>
-                      This civilization uses the local deterministic adapter. It is fast, offline-safe, and ideal for
-                      baseline world testing.
-                    </p>
-                  </div>
-                ) : null}
-              </article>
-            );
-          })}
-        </div>
-      </section>
+      <CivilizationSettingsSheet
+        open={settingsOpen}
+        onOpenChange={setSettingsOpen}
+        activeTab={settingsTab}
+        onTabChange={setSettingsTab}
+        scenario={scenario}
+        settings={settings}
+        opencodeModels={opencodeModels}
+        opencodeCredentials={opencodeCredentials}
+        busy={busy}
+        onUpdateWorld={updateWorld}
+        onUpdateFaction={updateFaction}
+        onSaveSettings={() => saveSettings(settings)}
+        onGenerateWorld={() => requestGeneratedWorld()}
+        onRefreshOpencodeStatus={refreshOpencodeStatus}
+        onRefreshOpencodeModels={refreshOpencodeModels}
+        onLaunchProviderLogin={launchProviderLogin}
+      />
     </main>
   );
 }
 
 
-function MetricCard({ label, value }) {
+function buildMetrics(world, fallbackSeed) {
+  if (!world) {
+    return {
+      aliveAgents: 0,
+      settlements: 0,
+      landmarks: 0,
+      seed: fallbackSeed ?? "..."
+    };
+  }
+  const agents = Object.values(world.agents ?? {});
+  const landmarks = (world.props ?? []).filter((prop) =>
+    ["lighthouse", "observatory", "palace", "market", "shrine"].includes(prop.kind)
+  ).length;
+  return {
+    aliveAgents: agents.filter((agent) => agent.alive !== false).length,
+    settlements: world.settlements?.length ?? 0,
+    landmarks,
+    seed: world.seed ?? fallbackSeed ?? "..."
+  };
+}
+
+
+function buildTileInsight(world, point) {
+  if (!world || !point) {
+    return null;
+  }
+  const row = world.tiles?.[point.y];
+  const tile = row?.[point.x];
+  if (!tile) {
+    return null;
+  }
+  const agents = Object.values(world.agents ?? {}).filter(
+    (agent) => agent.x === point.x && agent.y === point.y && agent.alive !== false
+  );
+  const region = tile.region_id ? world.regions?.[tile.region_id] : null;
+  const settlement = (world.settlements ?? []).find((item) => item.x === point.x && item.y === point.y);
+  const props = (world.props ?? []).filter((prop) => prop.x === point.x && prop.y === point.y);
+  const structures = [
+    tile.terrain !== "plain" ? tile.terrain : null,
+    tile.feature,
+    settlement ? `${settlement.kind} settlement` : null,
+    ...props
+      .map((prop) => prop.kind)
+      .filter((kind) => !["tree-cluster", "grove", "mountain", "river-trace"].includes(kind))
+  ].filter(Boolean);
+  return {
+    tile,
+    region,
+    settlement,
+    agents,
+    structures
+  };
+}
+
+
+function describeTerritory(world, factionId) {
+  if (!world || !factionId) {
+    return "Unclaimed or neutral terrain.";
+  }
+  const territory = world.territories?.[factionId];
+  if (!territory) {
+    return `Controlled by ${factionId}.`;
+  }
+  return `${territory.tile_count} claimed tiles across ${territory.region_ids?.length ?? 0} regions.`;
+}
+
+
+function factionLabel(scenario, factionId) {
+  if (!factionId) {
+    return "neutral";
+  }
+  return scenario?.factions?.find((faction) => faction.id === factionId)?.name ?? factionId;
+}
+
+
+function MapMeta({ icon: Icon, label }) {
   return (
-    <article className="metric-card">
+    <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-sm text-zinc-300">
+      <Icon className="size-4 text-zinc-500" />
       <span>{label}</span>
-      <strong>{value}</strong>
-    </article>
+    </div>
   );
 }

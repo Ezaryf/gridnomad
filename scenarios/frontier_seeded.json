@@ -1,0 +1,265 @@
+{
+  "seed": 240315,
+  "config": {
+    "width": 128,
+    "height": 128,
+    "perception_radius": 2,
+    "snapshot_interval": 10,
+    "thought_memory_limit": 30,
+    "event_memory_limit": 30,
+    "reason_interval": 5,
+    "world_seed": 240315,
+    "generator_preset": "grand-continent",
+    "map_width": 128,
+    "map_height": 128,
+    "coastline_bias": 58,
+    "river_count": 8,
+    "settlement_density": 18,
+    "landmark_density": 16
+  },
+  "generator": {
+    "seed": 240315,
+    "preset": "grand-continent",
+    "width": 128,
+    "height": 128,
+    "coastline_bias": 58,
+    "river_count": 8,
+    "settlement_density": 18,
+    "landmark_density": 16
+  },
+  "factions": [
+    {
+      "id": "red",
+      "name": "Crimson Reach",
+      "color": "#dd6f6a",
+      "culture": [
+        {
+          "category": "norm",
+          "element": "River Pact",
+          "description": "Builders who reconnect cut-off lands are honored at dusk.",
+          "strength": 82
+        }
+      ]
+    },
+    {
+      "id": "blue",
+      "name": "Azure House",
+      "color": "#6aa8e7",
+      "culture": [
+        {
+          "category": "ritual",
+          "element": "Harbor Supper",
+          "description": "Food is shared after every safe return from the coast.",
+          "strength": 76
+        }
+      ]
+    },
+    {
+      "id": "gold",
+      "name": "Verdant Crown",
+      "color": "#d8bf67",
+      "culture": [
+        {
+          "category": "taboo",
+          "element": "Silent Peaks",
+          "description": "Mountain sanctuaries should not be disturbed without council approval.",
+          "strength": 71
+        }
+      ]
+    }
+  ],
+  "agents": [
+    {
+      "id": "ada",
+      "name": "Ada",
+      "faction_id": "red",
+      "personality": {
+        "openness": 8,
+        "conscientiousness": 7,
+        "extraversion": 5,
+        "agreeableness": 8,
+        "neuroticism": 3
+      },
+      "emotions": {
+        "Joy": 4,
+        "Sadness": 2,
+        "Fear": 1,
+        "Anger": 1,
+        "Disgust": 0,
+        "Surprise": 3
+      },
+      "needs": {
+        "Survival": 5,
+        "Safety": 4,
+        "Belonging": 5,
+        "Esteem": 4,
+        "Self_Actualization": 4
+      },
+      "inventory": {
+        "food": 4,
+        "wood": 3,
+        "stone": 1
+      }
+    },
+    {
+      "id": "orin",
+      "name": "Orin",
+      "faction_id": "red",
+      "personality": {
+        "openness": 6,
+        "conscientiousness": 8,
+        "extraversion": 4,
+        "agreeableness": 7,
+        "neuroticism": 4
+      },
+      "emotions": {
+        "Joy": 3,
+        "Sadness": 2,
+        "Fear": 2,
+        "Anger": 1,
+        "Disgust": 0,
+        "Surprise": 2
+      },
+      "needs": {
+        "Survival": 4,
+        "Safety": 5,
+        "Belonging": 4,
+        "Esteem": 5,
+        "Self_Actualization": 3
+      },
+      "inventory": {
+        "food": 3,
+        "wood": 2,
+        "stone": 2
+      }
+    },
+    {
+      "id": "bo",
+      "name": "Bo",
+      "faction_id": "blue",
+      "personality": {
+        "openness": 5,
+        "conscientiousness": 6,
+        "extraversion": 7,
+        "agreeableness": 6,
+        "neuroticism": 4
+      },
+      "emotions": {
+        "Joy": 5,
+        "Sadness": 1,
+        "Fear": 2,
+        "Anger": 1,
+        "Disgust": 0,
+        "Surprise": 2
+      },
+      "needs": {
+        "Survival": 4,
+        "Safety": 3,
+        "Belonging": 6,
+        "Esteem": 4,
+        "Self_Actualization": 5
+      },
+      "inventory": {
+        "food": 3,
+        "wood": 1,
+        "stone": 2
+      }
+    },
+    {
+      "id": "marin",
+      "name": "Marin",
+      "faction_id": "blue",
+      "personality": {
+        "openness": 7,
+        "conscientiousness": 5,
+        "extraversion": 6,
+        "agreeableness": 7,
+        "neuroticism": 3
+      },
+      "emotions": {
+        "Joy": 4,
+        "Sadness": 1,
+        "Fear": 2,
+        "Anger": 1,
+        "Disgust": 0,
+        "Surprise": 4
+      },
+      "needs": {
+        "Survival": 5,
+        "Safety": 4,
+        "Belonging": 5,
+        "Esteem": 4,
+        "Self_Actualization": 6
+      },
+      "inventory": {
+        "food": 2,
+        "wood": 2,
+        "stone": 1
+      }
+    },
+    {
+      "id": "suri",
+      "name": "Suri",
+      "faction_id": "gold",
+      "personality": {
+        "openness": 9,
+        "conscientiousness": 6,
+        "extraversion": 4,
+        "agreeableness": 5,
+        "neuroticism": 2
+      },
+      "emotions": {
+        "Joy": 5,
+        "Sadness": 1,
+        "Fear": 1,
+        "Anger": 0,
+        "Disgust": 0,
+        "Surprise": 5
+      },
+      "needs": {
+        "Survival": 4,
+        "Safety": 4,
+        "Belonging": 3,
+        "Esteem": 5,
+        "Self_Actualization": 7
+      },
+      "inventory": {
+        "food": 3,
+        "wood": 2,
+        "stone": 2
+      }
+    },
+    {
+      "id": "cael",
+      "name": "Cael",
+      "faction_id": "gold",
+      "personality": {
+        "openness": 6,
+        "conscientiousness": 7,
+        "extraversion": 5,
+        "agreeableness": 5,
+        "neuroticism": 3
+      },
+      "emotions": {
+        "Joy": 3,
+        "Sadness": 2,
+        "Fear": 2,
+        "Anger": 1,
+        "Disgust": 0,
+        "Surprise": 3
+      },
+      "needs": {
+        "Survival": 4,
+        "Safety": 5,
+        "Belonging": 4,
+        "Esteem": 4,
+        "Self_Actualization": 5
+      },
+      "inventory": {
+        "food": 2,
+        "wood": 3,
+        "stone": 2
+      }
+    }
+  ]
+}

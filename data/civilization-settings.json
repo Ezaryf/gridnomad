@@ -1,7 +1,17 @@
 {
+  "world": {
+    "seed": 718882,
+    "generatorPreset": "grand-continent",
+    "width": 128,
+    "height": 128,
+    "coastlineBias": 58,
+    "riverCount": 8,
+    "settlementDensity": 18,
+    "landmarkDensity": 16
+  },
   "factions": {
     "red": {
-      "provider": "heuristic",
+      "provider": "opencode",
       "model": "",
       "apiKey": "",
       "googleApiKey": "",
@@ -14,6 +24,19 @@
       "baseUrl": ""
     },
     "blue": {
+      "provider": "opencode",
+      "model": "",
+      "apiKey": "",
+      "googleApiKey": "",
+      "authMode": "existing-cli-auth",
+      "googleCloudProject": "",
+      "useVertex": false,
+      "opencodeProvider": "",
+      "cliHome": "",
+      "timeoutSeconds": 120,
+      "baseUrl": ""
+    },
+    "gold": {
       "provider": "heuristic",
       "model": "",
       "apiKey": "",

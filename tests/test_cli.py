@@ -57,6 +57,31 @@ class CLITests(unittest.TestCase):
         finally:
             shutil.rmtree(scratch_root, ignore_errors=True)
 
+    def test_generate_world_command_returns_seeded_payload(self) -> None:
+        scenario = ROOT / "scenarios" / "frontier_seeded.json"
+        command = [
+            sys.executable,
+            "-m",
+            "gridnomad",
+            "generate-world",
+            "--scenario",
+            str(scenario),
+            "--seed",
+            "44",
+            "--map-width",
+            "32",
+            "--map-height",
+            "32",
+        ]
+        result = subprocess.run(command, cwd=ROOT, capture_output=True, text=True, check=False)
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["world"]["seed"], 44)
+        self.assertEqual(payload["world"]["width"], 32)
+        self.assertEqual(payload["world"]["height"], 32)
+        self.assertGreater(len(payload["world"]["settlements"]), 0)
+
 
 if __name__ == "__main__":
     unittest.main()

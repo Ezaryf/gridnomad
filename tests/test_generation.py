@@ -1,0 +1,52 @@
+from __future__ import annotations
+
+import unittest
+from pathlib import Path
+
+from helpers import ROOT
+from gridnomad.core.scenario import load_scenario
+
+
+class GenerationTests(unittest.TestCase):
+    def test_generated_world_is_deterministic_for_seed(self) -> None:
+        scenario = ROOT / "scenarios" / "frontier_seeded.json"
+        first = load_scenario(scenario, seed_override=77, width_override=40, height_override=40)
+        second = load_scenario(scenario, seed_override=77, width_override=40, height_override=40)
+        self.assertEqual(first.world.to_dict(), second.world.to_dict())
+
+    def test_generated_world_changes_when_seed_changes(self) -> None:
+        scenario = ROOT / "scenarios" / "frontier_seeded.json"
+        first = load_scenario(scenario, seed_override=77, width_override=40, height_override=40)
+        second = load_scenario(scenario, seed_override=91, width_override=40, height_override=40)
+        self.assertNotEqual(first.world.to_dict()["tiles"], second.world.to_dict()["tiles"])
+
+    def test_generated_world_invariants_hold(self) -> None:
+        scenario = ROOT / "scenarios" / "frontier_seeded.json"
+        bundle = load_scenario(scenario, seed_override=99, width_override=48, height_override=48)
+        world = bundle.world
+
+        self.assertGreaterEqual(len(world.settlements), len(world.factions))
+        self.assertTrue(any(tile["kind"] == "river-trace" for tile in world.props))
+
+        for settlement in world.settlements:
+            tile = world.get_tile(settlement["x"], settlement["y"])
+            self.assertNotEqual(tile.terrain.value, "water")
+            self.assertEqual(tile.settlement_id, settlement["id"])
+
+        for road in world.roads:
+            self.assertGreaterEqual(len(road["points"]), 2)
+            for point in road["points"]:
+                self.assertTrue(world.in_bounds(point["x"], point["y"]))
+
+        for faction_id, territory in world.territories.items():
+            self.assertIn(faction_id, world.factions)
+            self.assertGreater(territory["tile_count"], 0)
+
+        river_traces = [prop for prop in world.props if prop["kind"] == "river-trace"]
+        for river in river_traces:
+            end = river["points"][-1]
+            self.assertEqual(world.get_tile(end["x"], end["y"]).terrain.value, "water")
+
+
+if __name__ == "__main__":
+    unittest.main()
