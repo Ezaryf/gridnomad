@@ -32,6 +32,12 @@ class GenerationTests(unittest.TestCase):
             tile = world.get_tile(settlement["x"], settlement["y"])
             self.assertNotEqual(tile.terrain.value, "water")
             self.assertEqual(tile.settlement_id, settlement["id"])
+            self.assertTrue(settlement["sprite_key"].startswith("settlement-"))
+            self.assertGreaterEqual(len(settlement["footprint"]), 1)
+            for segment in settlement["footprint"]:
+                self.assertTrue(world.in_bounds(segment["x"], segment["y"]))
+                self.assertIn("district_kind", segment)
+                self.assertIn("sprite_key", segment)
 
         for road in world.roads:
             self.assertGreaterEqual(len(road["points"]), 2)
@@ -46,6 +52,30 @@ class GenerationTests(unittest.TestCase):
         for river in river_traces:
             end = river["points"][-1]
             self.assertEqual(world.get_tile(end["x"], end["y"]).terrain.value, "water")
+
+        for row in world.tiles:
+            for tile in row:
+                payload = tile.to_dict()
+                self.assertIn("visual_variant", payload)
+                self.assertIn("edge_mask", payload)
+                self.assertIn("river_mask", payload)
+                self.assertIn("road_mask", payload)
+                self.assertIn("decal", payload)
+                self.assertIn("elevation_band", payload)
+                self.assertGreaterEqual(payload["edge_mask"], 0)
+                self.assertLessEqual(payload["edge_mask"], 15)
+                self.assertGreaterEqual(payload["river_mask"], 0)
+                self.assertLessEqual(payload["river_mask"], 15)
+                self.assertGreaterEqual(payload["road_mask"], 0)
+                self.assertLessEqual(payload["road_mask"], 15)
+
+        for prop in world.props:
+            if prop["kind"] == "river-trace":
+                self.assertIn("sprite_key", prop)
+                self.assertIn("layer", prop)
+                continue
+            self.assertIn("sprite_key", prop)
+            self.assertIn("layer", prop)
 
 
 if __name__ == "__main__":

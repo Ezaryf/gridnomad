@@ -19,6 +19,8 @@
     "clsx": "^2.1.1",
     "lucide-react": "^0.577.0",
     "next": "latest",
+    "pixi-viewport": "^6.0.3",
+    "pixi.js": "^8.17.1",
     "postcss": "^8.5.8",
     "pyright": "^1.1.408",
     "react": "latest",

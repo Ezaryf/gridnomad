@@ -10,6 +10,45 @@ from gridnomad.core.models import FactionState, SimulationConfig, TileState, Til
 
 
 CARDINALS = ((0, -1), (1, 0), (0, 1), (-1, 0))
+MASK_BITS = ((0, -1, 1), (1, 0, 2), (0, 1, 4), (-1, 0, 8))
+
+PROP_SPRITES = {
+    "tree-cluster": "prop-tree-cluster",
+    "grove": "prop-grove",
+    "mountain": "prop-mountain-cluster",
+    "stone-outcrop": "prop-stone-outcrop",
+    "reed-bank": "prop-reeds",
+    "ship": "prop-ship",
+    "ford": "prop-ford",
+    "lighthouse": "landmark-lighthouse",
+    "observatory": "landmark-observatory",
+    "palace": "landmark-palace",
+    "market": "landmark-market",
+    "shrine": "landmark-shrine",
+    "river-trace": "trace-river",
+}
+
+PROP_LAYERS = {
+    "tree-cluster": "flora",
+    "grove": "flora",
+    "mountain": "relief",
+    "stone-outcrop": "detail",
+    "reed-bank": "detail",
+    "ship": "watercraft",
+    "ford": "detail",
+    "lighthouse": "landmark",
+    "observatory": "landmark",
+    "palace": "landmark",
+    "market": "landmark",
+    "shrine": "landmark",
+    "river-trace": "trace",
+}
+
+SETTLEMENT_SPRITES = {
+    "capital": "settlement-capital",
+    "port": "settlement-port",
+    "frontier": "settlement-frontier",
+}
 
 
 @dataclass(slots=True)
@@ -129,7 +168,7 @@ def generate_seeded_world(
             if tile.terrain == TileType.WATER:
                 if tile.feature == "river":
                     tile.biome = "river"
-                elif sea_distance[y][x] <= 2:
+                elif sea_distance[y][x] <= 3:
                     tile.biome = biome_palette["coast"]
                 else:
                     tile.biome = biome_palette["ocean"]
@@ -169,7 +208,7 @@ def generate_seeded_world(
                 tile.biome = biome_palette["scrub"]
                 if _hash01(settings.seed + 809, x, y) > 0.78:
                     props.append(_prop("stone-outcrop", x, y, variant=_variant(settings.seed + 43, x, y, 3)))
-            elif sea_distance[y][x] <= 2:
+            elif sea_distance[y][x] <= 3:
                 tile.biome = biome_palette["coast"]
                 if _hash01(settings.seed + 877, x, y) > 0.83:
                     props.append(_prop("reed-bank", x, y, variant=_variant(settings.seed + 47, x, y, 3)))
@@ -201,10 +240,12 @@ def generate_seeded_world(
     _assign_regions(tiles, regions)
 
     settlements = _place_settlements(tiles, water_distance, factions, settings, rng)
+    _decorate_settlement_footprints(tiles, settlements, settings)
     faction_spawns = _assign_territories(tiles, factions, settlements)
     roads = _build_roads(tiles, settlements, settings)
     _place_landmarks(tiles, settlements, props, settings, rng)
     _add_water_props(tiles, props, settings)
+    _annotate_tile_visuals(tiles, settings)
 
     world = WorldState(
         width=width,
@@ -463,6 +504,77 @@ def _place_settlements(
     return settlements
 
 
+def _decorate_settlement_footprints(
+    tiles: list[list[TileState]],
+    settlements: list[dict[str, Any]],
+    settings: GeneratorSettings,
+) -> None:
+    occupied: set[tuple[int, int]] = set()
+    width = settings.width
+    height = settings.height
+    for settlement in settlements:
+        x = int(settlement["x"])
+        y = int(settlement["y"])
+        kind = str(settlement["kind"])
+        settlement["district_kind"] = kind
+        settlement["sprite_key"] = SETTLEMENT_SPRITES.get(kind, "settlement-frontier")
+        footprint: list[dict[str, Any]] = []
+        for index, (dx, dy, district_kind) in enumerate(_district_pattern(kind, tiles, x, y)):
+            nx = x + dx
+            ny = y + dy
+            if not (0 <= nx < width and 0 <= ny < height):
+                continue
+            if (nx, ny) in occupied:
+                continue
+            tile = tiles[ny][nx]
+            if tile.terrain == TileType.WATER or tile.feature == "mountain":
+                continue
+            footprint.append(
+                {
+                    "x": nx,
+                    "y": ny,
+                    "district_kind": district_kind,
+                    "sprite_key": f"{settlement['sprite_key']}-{district_kind}",
+                    "is_core": index == 0,
+                }
+            )
+            occupied.add((nx, ny))
+            tile.owner_faction = tile.owner_faction or settlement["owner_faction"]
+            if tile.settlement_id is None:
+                tile.settlement_id = settlement["id"]
+            if index > 0 and tile.feature in {None, "forest", "road"}:
+                tile.feature = "district"
+        settlement["footprint"] = footprint
+
+
+def _district_pattern(
+    kind: str,
+    tiles: list[list[TileState]],
+    x: int,
+    y: int,
+) -> list[tuple[int, int, str]]:
+    shoreline = _shore_direction(tiles, x, y)
+    if kind == "capital":
+        return [
+            (0, 0, "core"),
+            (-1, 0, "ward"),
+            (1, 0, "ward"),
+            (0, -1, "civic"),
+            (0, 1, "garden"),
+            (-1, 1, "garden"),
+            (1, 1, "garden"),
+        ]
+    if kind == "port":
+        if shoreline == "west":
+            return [(0, 0, "core"), (1, 0, "market"), (0, -1, "dock"), (0, 1, "dock")]
+        if shoreline == "east":
+            return [(0, 0, "core"), (-1, 0, "market"), (0, -1, "dock"), (0, 1, "dock")]
+        if shoreline == "north":
+            return [(0, 0, "core"), (0, 1, "market"), (-1, 0, "dock"), (1, 0, "dock")]
+        return [(0, 0, "core"), (0, -1, "market"), (-1, 0, "dock"), (1, 0, "dock")]
+    return [(0, 0, "core"), (-1, 0, "homestead"), (0, 1, "homestead"), (1, 0, "store")]
+
+
 def _assign_territories(
     tiles: list[list[TileState]],
     factions: dict[str, FactionState],
@@ -488,6 +600,126 @@ def _assign_territories(
     for faction_id, capital in capitals.items():
         spawns[faction_id].insert(0, capital)
     return spawns
+
+
+def _annotate_tile_visuals(
+    tiles: list[list[TileState]],
+    settings: GeneratorSettings,
+) -> None:
+    for y, row in enumerate(tiles):
+        for x, tile in enumerate(row):
+            tile.visual_variant = _variant(settings.seed + 1459, x, y, 4)
+            tile.edge_mask = _contrast_mask(tiles, x, y)
+            tile.river_mask = _connection_mask(tiles, x, y, _is_river_connection)
+            tile.road_mask = _connection_mask(tiles, x, y, _is_road_connection)
+            tile.elevation_band = _elevation_band(tile.elevation, tile.biome)
+            tile.decal = _choose_tile_decal(tile, settings.seed, x, y)
+
+
+def _contrast_mask(tiles: list[list[TileState]], x: int, y: int) -> int:
+    tile = tiles[y][x]
+    mask = 0
+    is_water = tile.terrain == TileType.WATER
+    width = len(tiles[0])
+    height = len(tiles)
+    for dx, dy, bit in MASK_BITS:
+        nx = x + dx
+        ny = y + dy
+        if not (0 <= nx < width and 0 <= ny < height):
+            continue
+        other = tiles[ny][nx]
+        if is_water and other.terrain != TileType.WATER:
+            mask |= bit
+        elif not is_water and other.terrain == TileType.WATER:
+            mask |= bit
+    return mask
+
+
+def _connection_mask(
+    tiles: list[list[TileState]],
+    x: int,
+    y: int,
+    predicate,
+) -> int:
+    if not predicate(tiles[y][x]):
+        return 0
+    mask = 0
+    width = len(tiles[0])
+    height = len(tiles)
+    for dx, dy, bit in MASK_BITS:
+        nx = x + dx
+        ny = y + dy
+        if not (0 <= nx < width and 0 <= ny < height):
+            continue
+        if predicate(tiles[ny][nx]):
+            mask |= bit
+    return mask
+
+
+def _is_river_connection(tile: TileState) -> bool:
+    return tile.terrain == TileType.WATER and tile.feature == "river"
+
+
+def _is_road_connection(tile: TileState) -> bool:
+    return tile.terrain == TileType.BRIDGE or tile.feature in {"road", "settlement"}
+
+
+def _elevation_band(elevation: int, biome: str) -> str:
+    if biome in {"sea", "fjord", "river"}:
+        return "water"
+    if elevation >= 86:
+        return "summit"
+    if elevation >= 68:
+        return "highland"
+    if elevation >= 48:
+        return "upland"
+    if biome in {"coast", "lagoon", "shoreline"}:
+        return "coast"
+    return "lowland"
+
+
+def _choose_tile_decal(tile: TileState, seed: int, x: int, y: int) -> str | None:
+    value = _hash01(seed + 1601, x, y)
+    if tile.terrain == TileType.WATER:
+        if tile.feature == "river" and value > 0.8:
+            return "water-glint"
+        if tile.edge_mask and value > 0.72:
+            return "sea-foam"
+        return None
+    if tile.settlement_id:
+        return None
+    if tile.feature == "forest" and value > 0.55:
+        return "fern-cluster"
+    if tile.feature == "mountain" and value > 0.44:
+        return "snow-cap"
+    if tile.biome in {"coast", "lagoon", "shoreline"} and value > 0.68:
+        return "shell-bank"
+    if tile.biome in {"grassland", "meadow", "island-grass", "orchard", "high-pasture", "vale"}:
+        if value > 0.9:
+            return "wildflowers"
+        if value > 0.78:
+            return "grass-tuft"
+    if tile.biome in {"scrub", "dune", "moor"} and value > 0.82:
+        return "pebbles"
+    return None
+
+
+def _shore_direction(tiles: list[list[TileState]], x: int, y: int) -> str:
+    width = len(tiles[0])
+    height = len(tiles)
+    for dx, dy, _ in MASK_BITS:
+        nx = x + dx
+        ny = y + dy
+        if 0 <= nx < width and 0 <= ny < height and tiles[ny][nx].terrain == TileType.WATER:
+            if dx == -1:
+                return "west"
+            if dx == 1:
+                return "east"
+            if dy == -1:
+                return "north"
+            if dy == 1:
+                return "south"
+    return "south"
 
 
 def _build_roads(
@@ -648,6 +880,8 @@ def _annotate_river_metadata(world: WorldState, river_paths: list[list[tuple[int
             {
                 "id": f"river-{index:02d}",
                 "kind": "river-trace",
+                "sprite_key": PROP_SPRITES["river-trace"],
+                "layer": PROP_LAYERS["river-trace"],
                 "points": [{"x": x, "y": y} for x, y in path],
             }
         )
@@ -689,7 +923,16 @@ def _region_name(index: int, seed: int) -> str:
 
 
 def _prop(kind: str, x: int, y: int, **extra: Any) -> dict[str, Any]:
-    payload = {"id": f"{kind}-{x}-{y}-{extra.get('variant', 0)}", "kind": kind, "x": x, "y": y}
+    sprite_key = extra.pop("sprite_key", PROP_SPRITES.get(kind, kind))
+    layer = extra.pop("layer", PROP_LAYERS.get(kind, "detail"))
+    payload = {
+        "id": f"{kind}-{x}-{y}-{extra.get('variant', 0)}",
+        "kind": kind,
+        "x": x,
+        "y": y,
+        "sprite_key": sprite_key,
+        "layer": layer,
+    }
     payload.update(extra)
     return payload
 

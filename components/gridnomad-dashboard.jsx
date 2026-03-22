@@ -46,6 +46,7 @@ export default function GridNomadDashboard() {
   const [settingsTab, setSettingsTab] = useState("world");
   const [overlays, setOverlays] = useState({
     territories: true,
+    roads: true,
     resources: false,
     agents: true
   });
@@ -270,7 +271,7 @@ export default function GridNomadDashboard() {
 
         <AtlasMetrics metrics={metrics} />
 
-        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_390px]">
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
           <div className="space-y-4">
             <Card className="overflow-hidden bg-[linear-gradient(180deg,rgba(255,255,255,0.03),rgba(255,255,255,0.015))]">
               <CardHeader className="border-b border-white/8 pb-4">
@@ -280,9 +281,9 @@ export default function GridNomadDashboard() {
                       <Badge>World stage</Badge>
                       {snapshot ? <Badge variant="muted">Tick {snapshot.tick}</Badge> : <Badge variant="muted">Preview</Badge>}
                     </div>
-                    <CardTitle className="text-xl">Immersive seeded overworld</CardTitle>
+                    <CardTitle className="text-xl">Illustrated seeded pixel atlas</CardTitle>
                     <CardDescription>
-                      The colorful pixel map stays vivid inside a pure-black UI shell with quieter chrome and cleaner controls.
+                      Procedural world data now renders as a layered sprite atlas with denser terrain, richer settlements, animated water, and cleaner exploration controls.
                     </CardDescription>
                   </div>
                   <div className="flex flex-wrap gap-2">

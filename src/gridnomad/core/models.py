@@ -290,6 +290,12 @@ class TileState:
     feature: str | None = None
     region_id: str | None = None
     settlement_id: str | None = None
+    visual_variant: int = 0
+    edge_mask: int = 0
+    river_mask: int = 0
+    road_mask: int = 0
+    decal: str | None = None
+    elevation_band: str = "lowland"
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "TileState":
@@ -305,6 +311,12 @@ class TileState:
             feature=data.get("feature"),
             region_id=data.get("region_id"),
             settlement_id=data.get("settlement_id"),
+            visual_variant=require_int("visual_variant", data.get("visual_variant", 0), 0, 16, clamp=True),
+            edge_mask=require_int("edge_mask", data.get("edge_mask", 0), 0, 15, clamp=True),
+            river_mask=require_int("river_mask", data.get("river_mask", 0), 0, 15, clamp=True),
+            road_mask=require_int("road_mask", data.get("road_mask", 0), 0, 15, clamp=True),
+            decal=data.get("decal"),
+            elevation_band=str(data.get("elevation_band", "lowland")),
         )
 
     @property
@@ -354,6 +366,12 @@ class TileState:
             "feature": self.feature,
             "region_id": self.region_id,
             "settlement_id": self.settlement_id,
+            "visual_variant": self.visual_variant,
+            "edge_mask": self.edge_mask,
+            "river_mask": self.river_mask,
+            "road_mask": self.road_mask,
+            "decal": self.decal,
+            "elevation_band": self.elevation_band,
         }
 
 

@@ -81,6 +81,9 @@ class CLITests(unittest.TestCase):
         self.assertEqual(payload["world"]["width"], 32)
         self.assertEqual(payload["world"]["height"], 32)
         self.assertGreater(len(payload["world"]["settlements"]), 0)
+        self.assertIn("visual_variant", payload["world"]["tiles"][0][0])
+        self.assertIn("sprite_key", payload["world"]["settlements"][0])
+        self.assertIn("footprint", payload["world"]["settlements"][0])
 
 
 if __name__ == "__main__":
