@@ -117,10 +117,25 @@ class CivilizationSettings:
     def from_dict(cls, data: dict[str, Any]) -> "CivilizationSettings":
         raw_factions = data.get("factions", {})
         if raw_factions:
+            if isinstance(raw_factions, list):
+                return cls(
+                    factions={
+                        str(faction["id"]): CivilizationProviderConfig.from_dict(faction.get("controller", {}))
+                        for faction in raw_factions
+                    }
+                )
             return cls(
                 factions={
                     faction_id: CivilizationProviderConfig.from_dict(config)
                     for faction_id, config in raw_factions.items()
+                }
+            )
+        starter_kingdoms = data.get("starter_kingdoms", [])
+        if starter_kingdoms:
+            return cls(
+                factions={
+                    str(kingdom["id"]): CivilizationProviderConfig.from_dict(kingdom.get("controller", {}))
+                    for kingdom in starter_kingdoms
                 }
             )
         groups = data.get("groups", [])

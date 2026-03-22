@@ -27,6 +27,8 @@ class GenerationTests(unittest.TestCase):
 
         self.assertGreaterEqual(len(world.settlements), len(world.factions))
         self.assertTrue(any(tile["kind"] == "river-trace" for tile in world.props))
+        self.assertEqual(set(world.kingdoms), set(world.factions))
+        self.assertGreaterEqual(len(world.cities), len(world.factions))
 
         for settlement in world.settlements:
             tile = world.get_tile(settlement["x"], settlement["y"])
@@ -62,12 +64,25 @@ class GenerationTests(unittest.TestCase):
                 self.assertIn("road_mask", payload)
                 self.assertIn("decal", payload)
                 self.assertIn("elevation_band", payload)
+                self.assertIn("fertility", payload)
+                self.assertIn("resource_tags", payload)
+                self.assertIn("danger_tags", payload)
+                self.assertIn("race_affinity", payload)
+                self.assertIn("city_score", payload)
                 self.assertGreaterEqual(payload["edge_mask"], 0)
                 self.assertLessEqual(payload["edge_mask"], 15)
                 self.assertGreaterEqual(payload["river_mask"], 0)
                 self.assertLessEqual(payload["river_mask"], 15)
                 self.assertGreaterEqual(payload["road_mask"], 0)
                 self.assertLessEqual(payload["road_mask"], 15)
+                self.assertGreaterEqual(payload["fertility"], 0)
+                self.assertLessEqual(payload["fertility"], 100)
+                self.assertGreaterEqual(payload["city_score"], 0)
+                self.assertLessEqual(payload["city_score"], 100)
+                self.assertIn("human", payload["race_affinity"])
+                self.assertIn("orc", payload["race_affinity"])
+                self.assertIn("elf", payload["race_affinity"])
+                self.assertIn("dwarf", payload["race_affinity"])
 
         for prop in world.props:
             if prop["kind"] == "river-trace":

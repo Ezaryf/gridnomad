@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   PROVIDER_OPTIONS,
+  buildRuntimeControllerMap,
   normalizeSettings,
   synthesizeScenario
 } from "../lib/civilization-setup.js";
@@ -59,45 +60,81 @@ const BASE_SCENARIO = {
 };
 
 
-test("normalizeSettings migrates legacy controller settings into groups", () => {
+test("normalizeSettings migrates legacy groups into starter kingdoms", () => {
   const normalized = normalizeSettings(BASE_SCENARIO, {
-    world: { civilizationCount: 3 },
-    factions: {
-      red: { provider: "opencode", model: "gpt-5/open" },
-      blue: { provider: "gemini-cli", model: "gemini-2.5-pro" }
-    }
-  });
-
-  assert.equal(normalized.groups.length, 3);
-  assert.equal(normalized.groups[0].controller.provider, "opencode");
-  assert.equal(normalized.groups[1].controller.provider, "gemini-cli");
-  assert.equal(normalized.groups[2].population_count, 1);
-});
-
-
-test("synthesizeScenario reflects groups and generated human rosters", () => {
-  const normalized = normalizeSettings(BASE_SCENARIO, {
-    world: { civilizationCount: 4, seed: 91, width: 80, height: 80 },
     groups: [
       {
         id: "red",
         name: "Crimson Reach",
         color: "#dd6f6a",
-        culture: [{ category: "norm", element: "River Pact", description: "Build together.", strength: 80 }],
-        population_count: 2,
-        controller: { provider: "heuristic" },
-        humans: [{ id: "ada", name: "Ada" }]
+        population_count: 6,
+        controller: { provider: "opencode", model: "gpt-5/open" }
       }
     ]
   });
 
+  assert.ok(Array.isArray(normalized.races));
+  assert.ok(Array.isArray(normalized.starter_kingdoms));
+  assert.equal(normalized.starter_kingdoms[0].controller.provider, "opencode");
+  assert.equal(normalized.starter_kingdoms[0].race_kind, "human");
+});
+
+
+test("synthesizeScenario expands races, kingdoms, and fauna into runtime factions and humans", () => {
+  const normalized = normalizeSettings(BASE_SCENARIO, {
+    world: { seed: 91, width: 80, height: 80, faunaDensity: 70 },
+    races: [
+      { id: "human", enabled: true, auto_seed_count: 1, starting_population: 12 },
+      { id: "orc", enabled: true, auto_seed_count: 1, starting_population: 10 },
+      { id: "elf", enabled: false, auto_seed_count: 0 },
+      { id: "dwarf", enabled: false, auto_seed_count: 0 }
+    ],
+    starter_kingdoms: [
+      {
+        id: "manual-keep",
+        name: "Manual Keep",
+        race_kind: "human",
+        population: 8,
+        controller: { provider: "heuristic" }
+      }
+    ],
+    fauna: {
+      species: [
+        { id: "wolves", enabled: true, count: 5 },
+        { id: "dragons", enabled: true, count: 1 }
+      ]
+    }
+  });
+
   const runtimeScenario = synthesizeScenario(BASE_SCENARIO, normalized);
 
-  assert.equal(runtimeScenario.factions.length, 4);
   assert.equal(runtimeScenario.config.world_seed, 91);
   assert.equal(runtimeScenario.generator.width, 80);
-  assert.equal(runtimeScenario.agents.filter((agent) => agent.faction_id === "red").length, 2);
-  assert.ok(runtimeScenario.agents.some((agent) => agent.faction_id !== "red"));
+  assert.ok(runtimeScenario.factions.some((faction) => faction.id === "manual-keep"));
+  assert.ok(runtimeScenario.factions.some((faction) => faction.race_kind === "orc"));
+  assert.ok(runtimeScenario.agents.some((agent) => agent.race_kind === "human"));
+  assert.ok(runtimeScenario.agents.some((agent) => agent.faction_id === "manual-keep"));
+  assert.equal(runtimeScenario.fauna.species.find((item) => item.id === "wolves")?.count, 5);
+});
+
+
+test("runtime controller map resolves kingdoms into faction controller config", () => {
+  const normalized = normalizeSettings(BASE_SCENARIO, {
+    races: [
+      { id: "human", enabled: true, auto_seed_count: 1, controller: { provider: "gemini-cli", model: "gemini-2.5-pro" } },
+      { id: "orc", enabled: false, auto_seed_count: 0 },
+      { id: "elf", enabled: false, auto_seed_count: 0 },
+      { id: "dwarf", enabled: false, auto_seed_count: 0 }
+    ],
+    starter_kingdoms: [
+      { id: "manual-keep", name: "Manual Keep", race_kind: "human", population: 6, controller: { provider: "openai", model: "gpt-5-mini", apiKey: "sk" } }
+    ]
+  });
+
+  const runtime = buildRuntimeControllerMap(normalized);
+  assert.equal(runtime.factions["manual-keep"].provider, "openai");
+  const autoFactionIds = Object.keys(runtime.factions).filter((id) => id !== "manual-keep");
+  assert.equal(runtime.factions[autoFactionIds[0]].provider, "gemini-cli");
 });
 
 

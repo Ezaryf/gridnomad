@@ -2,24 +2,20 @@
 
 import {
   KeyRound,
-  MessagesSquare,
   MountainSnow,
-  Orbit,
+  PawPrint,
   Plus,
-  Sparkles,
-  Trash2,
+  Shield,
+  Trees,
   UserRoundCog
 } from "lucide-react";
 
 import {
-  ANTHROPIC_MODELS,
-  DIRECT_API_PROVIDERS,
-  GEMINI_API_MODELS,
-  GEMINI_MODELS,
-  OPENAI_MODELS,
   PROVIDER_OPTIONS,
   providerDisplayName,
-  providerSupportsBaseUrl
+  providerSupportsBaseUrl,
+  providerUsesApiKey,
+  providerUsesLogin
 } from "@/lib/civilization-setup";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -38,14 +34,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-
-const AUTH_OPTIONS = [
-  { value: "existing-cli-auth", label: "Existing CLI login" },
-  { value: "gemini-api-key", label: "Gemini API key" },
-  { value: "vertex-ai", label: "Vertex AI" }
-];
-
-
 export default function CivilizationSettingsSheet({
   open,
   onOpenChange,
@@ -57,12 +45,13 @@ export default function CivilizationSettingsSheet({
   territoryLookup,
   busy,
   onUpdateWorld,
-  onAddGroup,
-  onDeleteGroup,
-  onUpdateGroup,
-  onUpdateController,
-  onUpdatePopulation,
-  onUpdateHuman,
+  onUpdateRace,
+  onUpdateRaceController,
+  onAddStarterKingdom,
+  onDeleteStarterKingdom,
+  onUpdateStarterKingdom,
+  onUpdateKingdomController,
+  onUpdateFauna,
   onSaveSettings,
   onGenerateWorld,
   onRefreshOpencodeStatus,
@@ -71,36 +60,42 @@ export default function CivilizationSettingsSheet({
   onProviderCredentialChange,
   onLaunchProviderLogin
 }) {
-  const groups = settings.groups ?? [];
+  const races = settings.races ?? [];
+  const kingdoms = settings.starter_kingdoms ?? [];
+  const faunaSpecies = settings.fauna?.species ?? [];
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="left" className="w-full p-0 sm:max-w-[820px]">
+      <SheetContent side="left" className="w-full p-0 sm:max-w-[920px]">
         <SheetHeader className="border-b border-white/8 px-6 py-5">
-          <SheetTitle>Project setup</SheetTitle>
+          <SheetTitle>WorldBox setup</SheetTitle>
           <SheetDescription>
-            Create removable community groups, set how many humans each one spawns, and assign the controller that powers all human activity in that group.
+            Configure the world, tune race seeding, add manual starter kingdoms, assign AI controllers, and populate the wild.
           </SheetDescription>
         </SheetHeader>
 
         <Tabs value={activeTab} onValueChange={onTabChange} className="flex min-h-0 flex-1 flex-col">
           <div className="border-b border-white/8 px-6 py-4">
-            <TabsList className="grid w-full grid-cols-4">
+            <TabsList className="grid w-full grid-cols-5">
               <TabsTrigger value="world">
                 <MountainSnow className="mr-2 size-4" />
                 World
               </TabsTrigger>
-              <TabsTrigger value="groups">
-                <Orbit className="mr-2 size-4" />
-                Groups
+              <TabsTrigger value="races">
+                <Trees className="mr-2 size-4" />
+                Races
+              </TabsTrigger>
+              <TabsTrigger value="kingdoms">
+                <Shield className="mr-2 size-4" />
+                Kingdoms
               </TabsTrigger>
               <TabsTrigger value="controllers">
                 <UserRoundCog className="mr-2 size-4" />
                 Controllers
               </TabsTrigger>
-              <TabsTrigger value="humans">
-                <MessagesSquare className="mr-2 size-4" />
-                Humans
+              <TabsTrigger value="fauna">
+                <PawPrint className="mr-2 size-4" />
+                Fauna
               </TabsTrigger>
             </TabsList>
           </div>
@@ -112,25 +107,16 @@ export default function CivilizationSettingsSheet({
                   <CardHeader>
                     <CardTitle>World generator</CardTitle>
                     <CardDescription>
-                      Seed the canonical Python world and tune the geography before humans spawn onto the map.
+                      Seed the Python atlas and shape the geography before races, kingdoms, and animals enter it.
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="grid gap-4 sm:grid-cols-2">
                     <LabeledField label="Seed">
-                      <Input
-                        type="number"
-                        value={settings.world?.seed ?? ""}
-                        onChange={(event) => onUpdateWorld({ seed: Number(event.target.value) })}
-                      />
+                      <Input type="number" value={settings.world?.seed ?? ""} onChange={(event) => onUpdateWorld({ seed: Number(event.target.value) })} />
                     </LabeledField>
                     <LabeledField label="Preset">
-                      <Select
-                        value={settings.world?.generatorPreset ?? "grand-continent"}
-                        onValueChange={(value) => onUpdateWorld({ generatorPreset: value })}
-                      >
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
+                      <Select value={settings.world?.generatorPreset ?? "grand-continent"} onValueChange={(value) => onUpdateWorld({ generatorPreset: value })}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
                         <SelectContent>
                           <SelectItem value="grand-continent">Grand Continent</SelectItem>
                           <SelectItem value="archipelago">Archipelago</SelectItem>
@@ -139,172 +125,154 @@ export default function CivilizationSettingsSheet({
                       </Select>
                     </LabeledField>
                     <LabeledField label="Width">
-                      <Input
-                        type="number"
-                        min="24"
-                        max="256"
-                        value={settings.world?.width ?? 128}
-                        onChange={(event) => onUpdateWorld({ width: Number(event.target.value) })}
-                      />
+                      <Input type="number" min="24" max="256" value={settings.world?.width ?? 128} onChange={(event) => onUpdateWorld({ width: Number(event.target.value) })} />
                     </LabeledField>
                     <LabeledField label="Height">
-                      <Input
-                        type="number"
-                        min="24"
-                        max="256"
-                        value={settings.world?.height ?? 128}
-                        onChange={(event) => onUpdateWorld({ height: Number(event.target.value) })}
-                      />
+                      <Input type="number" min="24" max="256" value={settings.world?.height ?? 128} onChange={(event) => onUpdateWorld({ height: Number(event.target.value) })} />
                     </LabeledField>
-                    <LabeledField label="Settlement density">
-                      <Input
-                        type="number"
-                        min="1"
-                        max="40"
-                        value={settings.world?.settlementDensity ?? 18}
-                        onChange={(event) => onUpdateWorld({ settlementDensity: Number(event.target.value) })}
-                      />
-                    </LabeledField>
-                    <LabeledField label="Landmark density">
-                      <Input
-                        type="number"
-                        min="0"
-                        max="40"
-                        value={settings.world?.landmarkDensity ?? 16}
-                        onChange={(event) => onUpdateWorld({ landmarkDensity: Number(event.target.value) })}
-                      />
-                    </LabeledField>
-                  </CardContent>
-                </Card>
-
-                <Card className="bg-white/[0.025]">
-                  <CardHeader>
-                    <CardTitle>Fine tuning</CardTitle>
-                    <CardDescription>Adjust terrain structure before group territories and human spawns are resolved.</CardDescription>
-                  </CardHeader>
-                  <CardContent className="grid gap-4 sm:grid-cols-2">
                     <LabeledField label="Coastline bias">
-                      <Input
-                        type="number"
-                        min="0"
-                        max="100"
-                        value={settings.world?.coastlineBias ?? 58}
-                        onChange={(event) => onUpdateWorld({ coastlineBias: Number(event.target.value) })}
-                      />
+                      <Input type="number" min="0" max="100" value={settings.world?.coastlineBias ?? 58} onChange={(event) => onUpdateWorld({ coastlineBias: Number(event.target.value) })} />
                     </LabeledField>
                     <LabeledField label="River count">
-                      <Input
-                        type="number"
-                        min="0"
-                        max="20"
-                        value={settings.world?.riverCount ?? 8}
-                        onChange={(event) => onUpdateWorld({ riverCount: Number(event.target.value) })}
-                      />
+                      <Input type="number" min="0" max="20" value={settings.world?.riverCount ?? 8} onChange={(event) => onUpdateWorld({ riverCount: Number(event.target.value) })} />
+                    </LabeledField>
+                    <LabeledField label="Settlement density">
+                      <Input type="number" min="1" max="40" value={settings.world?.settlementDensity ?? 18} onChange={(event) => onUpdateWorld({ settlementDensity: Number(event.target.value) })} />
+                    </LabeledField>
+                    <LabeledField label="Landmark density">
+                      <Input type="number" min="0" max="40" value={settings.world?.landmarkDensity ?? 16} onChange={(event) => onUpdateWorld({ landmarkDensity: Number(event.target.value) })} />
+                    </LabeledField>
+                    <LabeledField label="Biome density">
+                      <Input type="number" min="0" max="100" value={settings.world?.biomeDensity ?? 62} onChange={(event) => onUpdateWorld({ biomeDensity: Number(event.target.value) })} />
+                    </LabeledField>
+                    <LabeledField label="Fauna density">
+                      <Input type="number" min="0" max="100" value={settings.world?.faunaDensity ?? 54} onChange={(event) => onUpdateWorld({ faunaDensity: Number(event.target.value) })} />
+                    </LabeledField>
+                    <LabeledField label="Kingdom growth intensity">
+                      <Input type="number" min="0" max="100" value={settings.world?.kingdomGrowthIntensity ?? 60} onChange={(event) => onUpdateWorld({ kingdomGrowthIntensity: Number(event.target.value) })} />
                     </LabeledField>
                   </CardContent>
                 </Card>
               </div>
             </TabsContent>
 
-            <TabsContent value="groups" className="m-0 px-6 py-5">
+            <TabsContent value="races" className="m-0 px-6 py-5">
+              <div className="space-y-5">
+                {races.map((race) => (
+                  <Card key={race.id} className="bg-white/[0.025]">
+                    <CardHeader>
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <CardTitle>{race.name}</CardTitle>
+                          <CardDescription>Enable or disable this race, set auto-seeding, and choose its default kingdom controller.</CardDescription>
+                        </div>
+                        <Badge variant={race.enabled ? "solid" : "muted"}>{race.enabled ? "Enabled" : "Disabled"}</Badge>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="grid gap-4 sm:grid-cols-2">
+                      <LabeledField label="Enabled">
+                        <Select value={String(race.enabled)} onValueChange={(value) => onUpdateRace(race.id, { enabled: value === "true" })}>
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="true">Enabled</SelectItem>
+                            <SelectItem value="false">Disabled</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </LabeledField>
+                      <LabeledField label="Auto-seeded kingdoms">
+                        <Input type="number" min="0" max="4" value={race.auto_seed_count} onChange={(event) => onUpdateRace(race.id, { auto_seed_count: Number(event.target.value) })} />
+                      </LabeledField>
+                      <LabeledField label="Starting population">
+                        <Input type="number" min="1" max="96" value={race.starting_population} onChange={(event) => onUpdateRace(race.id, { starting_population: Number(event.target.value) })} />
+                      </LabeledField>
+                      <LabeledField label="Color">
+                        <Input type="color" value={race.color} onChange={(event) => onUpdateRace(race.id, { color: event.target.value })} className="h-10 p-1" />
+                      </LabeledField>
+                      <div className="sm:col-span-2">
+                        <LabeledField label="Primary cultural element">
+                          <Input
+                            value={race.culture?.[0]?.element ?? ""}
+                            onChange={(event) => onUpdateRace(race.id, {
+                              culture: [{ ...(race.culture?.[0] ?? {}), element: event.target.value }]
+                            })}
+                          />
+                        </LabeledField>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            </TabsContent>
+
+            <TabsContent value="kingdoms" className="m-0 px-6 py-5">
               <div className="mb-4 flex items-center justify-between gap-3">
                 <div>
-                  <h3 className="text-base font-semibold text-zinc-100">Community groups</h3>
-                  <p className="text-sm text-zinc-400">Add and delete the groups that will occupy the world.</p>
+                  <h3 className="text-base font-semibold text-zinc-100">Manual starter kingdoms</h3>
+                  <p className="text-sm text-zinc-400">Blend manual kingdoms into the world beside the auto-seeded races.</p>
                 </div>
-                <Button variant="secondary" onClick={onAddGroup} disabled={groups.length >= 12}>
+                <Button variant="secondary" onClick={onAddStarterKingdom}>
                   <Plus className="size-4" />
-                  Add group
+                  Add kingdom
                 </Button>
               </div>
               <div className="space-y-5">
-                {groups.map((group, index) => {
-                  const culture = group.culture?.[0] ?? {};
-                  const territory = territoryLookup?.[group.id];
+                {kingdoms.map((kingdom) => {
+                  const territory = territoryLookup?.[kingdom.id];
                   return (
-                    <Card key={group.id} className="bg-white/[0.025]">
+                    <Card key={kingdom.id} className="bg-white/[0.025]">
                       <CardHeader className="pb-4">
                         <div className="flex items-start justify-between gap-4">
                           <div className="flex items-start gap-3">
-                            <div className="size-11 rounded-2xl border border-white/12" style={{ background: group.color }} />
+                            <div className="size-11 rounded-2xl border border-white/12" style={{ background: kingdom.color }} />
                             <div className="space-y-2">
-                              <CardTitle>{group.name}</CardTitle>
-                              <CardDescription>
-                                Group {index + 1} with {group.population_count} humans.
-                              </CardDescription>
+                              <CardTitle>{kingdom.name}</CardTitle>
+                              <CardDescription>{kingdom.population} humans · {kingdom.race_kind}</CardDescription>
                             </div>
                           </div>
                           <div className="flex flex-wrap items-center gap-2">
                             <Badge variant="muted">{territory ? `${territory.tile_count} tiles` : "Awaiting world"}</Badge>
-                            <Badge variant="muted">{group.controller?.provider ?? "heuristic"}</Badge>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => onDeleteGroup(group.id)}
-                              disabled={groups.length <= 1}
-                            >
-                              <Trash2 className="size-4" />
-                            </Button>
+                            <Button variant="ghost" size="sm" onClick={() => onDeleteStarterKingdom(kingdom.id)}>Remove</Button>
                           </div>
                         </div>
                       </CardHeader>
                       <CardContent className="grid gap-4 sm:grid-cols-2">
-                        <LabeledField label="Group name">
-                          <Input
-                            value={group.name}
-                            onChange={(event) => onUpdateGroup(group.id, { name: event.target.value })}
-                          />
+                        <LabeledField label="Kingdom name">
+                          <Input value={kingdom.name} onChange={(event) => onUpdateStarterKingdom(kingdom.id, { name: event.target.value })} />
                         </LabeledField>
-                        <LabeledField label="Banner color">
-                          <div className="flex items-center gap-3">
-                            <Input
-                              type="color"
-                              value={group.color}
-                              onChange={(event) => onUpdateGroup(group.id, { color: event.target.value })}
-                              className="h-11 w-16 min-w-16 p-1"
-                            />
-                            <Input
-                              value={group.color}
-                              onChange={(event) => onUpdateGroup(group.id, { color: event.target.value })}
-                            />
-                          </div>
+                        <LabeledField label="Race">
+                          <Select value={kingdom.race_kind} onValueChange={(value) => onUpdateStarterKingdom(kingdom.id, { race_kind: value })}>
+                            <SelectTrigger><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="human">Humans</SelectItem>
+                              <SelectItem value="orc">Orcs</SelectItem>
+                              <SelectItem value="elf">Elves</SelectItem>
+                              <SelectItem value="dwarf">Dwarves</SelectItem>
+                            </SelectContent>
+                          </Select>
                         </LabeledField>
-                        <LabeledField label="Culture seed">
-                          <Input
-                            value={culture.element ?? ""}
-                            onChange={(event) => onUpdateGroup(group.id, {
-                              culture: [{ ...culture, element: event.target.value }]
-                            })}
-                          />
+                        <LabeledField label="Population">
+                          <Input type="number" min="1" max="96" value={kingdom.population} onChange={(event) => onUpdateStarterKingdom(kingdom.id, { population: Number(event.target.value) })} />
                         </LabeledField>
-                        <LabeledField label="Culture summary">
-                          <Input
-                            value={culture.description ?? ""}
-                            onChange={(event) => onUpdateGroup(group.id, {
-                              culture: [{ ...culture, description: event.target.value }]
-                            })}
-                          />
+                        <LabeledField label="Color">
+                          <Input type="color" value={kingdom.color} onChange={(event) => onUpdateStarterKingdom(kingdom.id, { color: event.target.value })} className="h-10 p-1" />
                         </LabeledField>
-                        <LabeledField label="Population count">
-                          <Input
-                            type="number"
-                            min="1"
-                            max="48"
-                            value={group.population_count}
-                            onChange={(event) => onUpdatePopulation(group.id, Number(event.target.value))}
-                          />
+                        <LabeledField label="Placement mode">
+                          <Select value={String(kingdom.manual_position)} onValueChange={(value) => onUpdateStarterKingdom(kingdom.id, { manual_position: value === "true" })}>
+                            <SelectTrigger><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="false">Auto place</SelectItem>
+                              <SelectItem value="true">Manual coordinates</SelectItem>
+                            </SelectContent>
+                          </Select>
                         </LabeledField>
-                        <LabeledField label="Culture strength">
-                          <Input
-                            type="number"
-                            min="0"
-                            max="100"
-                            value={culture.strength ?? 70}
-                            onChange={(event) => onUpdateGroup(group.id, {
-                              culture: [{ ...culture, strength: Number(event.target.value) }]
-                            })}
-                          />
-                        </LabeledField>
+                        <div className="grid gap-4 sm:grid-cols-2">
+                          <LabeledField label="Spawn X">
+                            <Input type="number" value={kingdom.x ?? ""} onChange={(event) => onUpdateStarterKingdom(kingdom.id, { x: Number(event.target.value) })} disabled={!kingdom.manual_position} />
+                          </LabeledField>
+                          <LabeledField label="Spawn Y">
+                            <Input type="number" value={kingdom.y ?? ""} onChange={(event) => onUpdateStarterKingdom(kingdom.id, { y: Number(event.target.value) })} disabled={!kingdom.manual_position} />
+                          </LabeledField>
+                        </div>
                       </CardContent>
                     </Card>
                   );
@@ -313,408 +281,240 @@ export default function CivilizationSettingsSheet({
             </TabsContent>
 
             <TabsContent value="controllers" className="m-0 px-6 py-5">
-              <div className="space-y-5">
-                <Card className="bg-white/[0.025]">
-                  <CardHeader className="pb-4">
-                    <CardTitle>Provider status</CardTitle>
-                    <CardDescription>
-                      OpenCode credentials: {opencodeCredentials.length ? opencodeCredentials.join(", ") : "none detected"}
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="flex flex-wrap gap-2">
-                    <Button variant="secondary" onClick={onRefreshOpencodeStatus}>
-                      <Sparkles className="size-4" />
-                      Refresh OpenCode status
-                    </Button>
-                    <Button variant="secondary" onClick={() => onLaunchProviderLogin("gemini-cli")}>
-                      <KeyRound className="size-4" />
-                      Launch Gemini login
-                    </Button>
-                    <Button variant="secondary" onClick={() => onLaunchProviderLogin("opencode")}>
-                      <KeyRound className="size-4" />
-                      Launch OpenCode login
-                    </Button>
-                  </CardContent>
-                </Card>
+              <div className="space-y-6">
+                <ControllerGroup
+                  title="Race default controllers"
+                  description="These controllers are inherited by auto-seeded kingdoms for each race."
+                >
+                  {races.map((race) => (
+                    <ControllerCard
+                      key={`race:${race.id}`}
+                      title={race.name}
+                      subtitle={`Default ${race.id} controller`}
+                      controller={race.controller}
+                      catalog={providerCatalogs[`race:${race.id}`]}
+                      opencodeCredentials={opencodeCredentials}
+                      onRefreshOpencodeStatus={onRefreshOpencodeStatus}
+                      onRefreshProviderCatalog={(provider, credential = "") => onRefreshProviderCatalog("race", race.id, provider, credential)}
+                      onProviderChange={(provider) => onProviderChange("race", race.id, provider)}
+                      onCredentialChange={(credential) => onProviderCredentialChange("race", race.id, credential)}
+                      onUpdateController={(patch) => onUpdateRaceController(race.id, patch)}
+                      onLaunchProviderLogin={onLaunchProviderLogin}
+                    />
+                  ))}
+                </ControllerGroup>
 
-                {groups.map((group) => {
-                  const controller = group.controller ?? {};
-                  const catalog = providerCatalogs[group.id] ?? {};
-                  const fallbackModels = resolveFallbackModels(controller.provider);
-                  const listedModels = resolveModelOptions(
-                    catalog.models?.length
-                      ? catalog.models
-                      : controller.availableModels?.length
-                        ? controller.availableModels
-                        : fallbackModels,
-                    controller.model
-                  );
-                  const authStatus = resolveAuthStatus(controller, catalog);
-                  return (
-                    <Card key={group.id} className="bg-white/[0.025]">
-                      <CardHeader className="pb-4">
-                        <div className="flex items-start justify-between gap-3">
-                          <div>
-                            <CardTitle>{group.name}</CardTitle>
-                            <CardDescription>
-                              One controller profile powers all {group.population_count} humans in this group.
-                            </CardDescription>
-                          </div>
-                          <Badge variant="muted">{authStatus}</Badge>
-                        </div>
-                      </CardHeader>
-                      <CardContent className="space-y-4">
-                        <LabeledField label="Provider">
-                          <Select
-                            value={controller.provider ?? "heuristic"}
-                            onValueChange={(value) => onProviderChange(group.id, value)}
-                          >
-                            <SelectTrigger>
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {PROVIDER_OPTIONS.map((option) => (
-                                <SelectItem key={option.value} value={option.value}>
-                                  {option.label}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </LabeledField>
+                <Separator className="bg-white/8" />
 
-                        {controller.provider === "gemini-cli" ? (
-                          <div className="grid gap-4 sm:grid-cols-2">
-                            <LabeledField label="Auth mode">
-                              <Select
-                                value={controller.authMode ?? "existing-cli-auth"}
-                                onValueChange={(value) => onUpdateController(group.id, { authMode: value })}
-                              >
-                                <SelectTrigger>
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {AUTH_OPTIONS.map((option) => (
-                                    <SelectItem key={option.value} value={option.value}>
-                                      {option.label}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </LabeledField>
-                            <LabeledField label="Model dropdown">
-                              <Select
-                                value={controller.model || listedModels[0] || GEMINI_MODELS[0]}
-                                onValueChange={(value) => onUpdateController(group.id, { model: value })}
-                              >
-                                <SelectTrigger>
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {listedModels.map((model) => (
-                                    <SelectItem key={model} value={model}>
-                                      {model}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </LabeledField>
-                            <LabeledField label="Custom model override">
-                              <Input
-                                value={controller.model ?? ""}
-                                onChange={(event) => onUpdateController(group.id, { model: event.target.value })}
-                                placeholder={listedModels[0] ?? GEMINI_MODELS[0]}
-                              />
-                            </LabeledField>
-                            <LabeledField label="Gemini API key">
-                              <Input
-                                type="password"
-                                value={controller.apiKey ?? ""}
-                                onChange={(event) => onUpdateController(group.id, { apiKey: event.target.value })}
-                                placeholder="Optional if CLI login already exists"
-                              />
-                            </LabeledField>
-                          </div>
-                        ) : null}
-
-                        {DIRECT_API_PROVIDERS.includes(controller.provider) ? (
-                          <div className="grid gap-4 sm:grid-cols-2">
-                            <LabeledField label={`${providerDisplayName(controller.provider)} key`}>
-                              <Input
-                                type="password"
-                                value={controller.apiKey ?? ""}
-                                onChange={(event) => onUpdateController(group.id, { apiKey: event.target.value })}
-                                placeholder={`Saved locally for ${providerDisplayName(controller.provider)}`}
-                              />
-                            </LabeledField>
-                            <LabeledField label="Model dropdown">
-                              <Select
-                                value={controller.model || listedModels[0] || "__empty__"}
-                                onValueChange={(value) => onUpdateController(group.id, { model: value === "__empty__" ? "" : value })}
-                              >
-                                <SelectTrigger>
-                                  <SelectValue placeholder={`Choose a ${providerDisplayName(controller.provider)} model`} />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {!listedModels.length ? <SelectItem value="__empty__">Load models first</SelectItem> : null}
-                                  {listedModels.map((model) => (
-                                    <SelectItem key={model} value={model}>
-                                      {model}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </LabeledField>
-                            <LabeledField label="Custom model override">
-                              <Input
-                                value={controller.model ?? ""}
-                                onChange={(event) => onUpdateController(group.id, { model: event.target.value })}
-                                placeholder={listedModels[0] ?? fallbackModels[0] ?? ""}
-                              />
-                            </LabeledField>
-                            {providerSupportsBaseUrl(controller.provider) ? (
-                              <LabeledField label="Base URL override">
-                                <Input
-                                  value={controller.baseUrl ?? ""}
-                                  onChange={(event) => onUpdateController(group.id, { baseUrl: event.target.value })}
-                                  placeholder="Optional alternate API endpoint"
-                                />
-                              </LabeledField>
-                            ) : (
-                              <LabeledField label="Request timeout (seconds)">
-                                <Input
-                                  type="number"
-                                  min="15"
-                                  max="600"
-                                  value={controller.timeoutSeconds ?? 120}
-                                  onChange={(event) => onUpdateController(group.id, { timeoutSeconds: Number(event.target.value) })}
-                                />
-                              </LabeledField>
-                            )}
-                            <div className="sm:col-span-2 flex flex-wrap gap-2">
-                              <Button variant="secondary" onClick={() => onRefreshProviderCatalog(group.id, controller.provider)}>
-                                <Sparkles className="size-4" />
-                                Refresh catalog
-                              </Button>
-                            </div>
-                          </div>
-                        ) : null}
-
-                        {controller.provider === "opencode" ? (
-                          <div className="grid gap-4 sm:grid-cols-2">
-                            <LabeledField label="Credential dropdown">
-                              <Select
-                                value={controller.opencodeProvider || "__default__"}
-                                onValueChange={(value) => onProviderCredentialChange(group.id, value === "__default__" ? "" : value)}
-                              >
-                                <SelectTrigger>
-                                  <SelectValue placeholder="Choose OpenCode credential" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="__default__">Default credential</SelectItem>
-                                  {opencodeCredentials.map((credential) => (
-                                    <SelectItem key={credential} value={credential}>
-                                      {credential}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </LabeledField>
-                            <LabeledField label="Model dropdown">
-                              <Select
-                                value={controller.model || listedModels[0] || "__empty__"}
-                                onValueChange={(value) => onUpdateController(group.id, { model: value === "__empty__" ? "" : value })}
-                              >
-                                <SelectTrigger>
-                                  <SelectValue placeholder="Choose an OpenCode model" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {!listedModels.length ? <SelectItem value="__empty__">Load models first</SelectItem> : null}
-                                  {listedModels.map((model) => (
-                                    <SelectItem key={model} value={model}>
-                                      {model}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </LabeledField>
-                            <LabeledField label="Custom model override">
-                              <Input
-                                value={controller.model ?? ""}
-                                onChange={(event) => onUpdateController(group.id, { model: event.target.value })}
-                                placeholder={listedModels[0] ?? "Refresh catalog to load model options"}
-                              />
-                            </LabeledField>
-                            <LabeledField label="CLI home override">
-                              <Input
-                                value={controller.cliHome ?? ""}
-                                onChange={(event) => onUpdateController(group.id, { cliHome: event.target.value })}
-                                placeholder="Optional isolated OpenCode runtime path"
-                              />
-                            </LabeledField>
-                            <div className="sm:col-span-2 flex flex-wrap gap-2">
-                              <Button variant="secondary" onClick={() => onRefreshProviderCatalog(group.id, "opencode", controller.opencodeProvider)}>
-                                <Sparkles className="size-4" />
-                                Refresh catalog
-                              </Button>
-                              <Button variant="secondary" onClick={() => onLaunchProviderLogin("opencode")}>
-                                <KeyRound className="size-4" />
-                                OpenCode login
-                              </Button>
-                            </div>
-                          </div>
-                        ) : null}
-
-                        {controller.provider === "heuristic" ? (
-                          <div className="rounded-2xl border border-white/8 bg-white/[0.03] p-4 text-sm leading-6 text-zinc-400">
-                            This group uses the deterministic local adapter for fast offline-safe baseline runs.
-                          </div>
-                        ) : null}
-
-                        {DIRECT_API_PROVIDERS.includes(controller.provider) ? (
-                          <div className="rounded-2xl border border-white/8 bg-white/[0.03] p-4 text-sm leading-6 text-zinc-400">
-                            {providerDisplayName(controller.provider)} uses a direct API key. The selected model will control every human in this group.
-                          </div>
-                        ) : null}
-
-                        {catalog.login_hint ? (
-                          <div className="rounded-2xl border border-white/8 bg-white/[0.03] p-4 text-sm leading-6 text-zinc-400">
-                            {catalog.login_hint}
-                          </div>
-                        ) : null}
-                      </CardContent>
-                    </Card>
-                  );
-                })}
+                <ControllerGroup
+                  title="Manual kingdom controllers"
+                  description="These controllers power every human in the matching starter kingdom."
+                >
+                  {kingdoms.map((kingdom) => (
+                    <ControllerCard
+                      key={`kingdom:${kingdom.id}`}
+                      title={kingdom.name}
+                      subtitle={`${kingdom.population} humans · ${kingdom.race_kind}`}
+                      controller={kingdom.controller}
+                      catalog={providerCatalogs[`kingdom:${kingdom.id}`]}
+                      opencodeCredentials={opencodeCredentials}
+                      onRefreshOpencodeStatus={onRefreshOpencodeStatus}
+                      onRefreshProviderCatalog={(provider, credential = "") => onRefreshProviderCatalog("kingdom", kingdom.id, provider, credential)}
+                      onProviderChange={(provider) => onProviderChange("kingdom", kingdom.id, provider)}
+                      onCredentialChange={(credential) => onProviderCredentialChange("kingdom", kingdom.id, credential)}
+                      onUpdateController={(patch) => onUpdateKingdomController(kingdom.id, patch)}
+                      onLaunchProviderLogin={onLaunchProviderLogin}
+                    />
+                  ))}
+                </ControllerGroup>
               </div>
             </TabsContent>
 
-            <TabsContent value="humans" className="m-0 px-6 py-5">
+            <TabsContent value="fauna" className="m-0 px-6 py-5">
               <div className="space-y-5">
-                {groups.map((group) => (
-                  <Card key={group.id} className="bg-white/[0.025]">
-                    <CardHeader className="pb-4">
-                      <div className="flex items-start justify-between gap-3">
+                {faunaSpecies.map((species) => (
+                  <Card key={species.id} className="bg-white/[0.025]">
+                    <CardHeader>
+                      <div className="flex items-center justify-between gap-3">
                         <div>
-                          <CardTitle>{group.name} population</CardTitle>
-                          <CardDescription>
-                            These humans are the moving population on the map. Every one of them inherits the group controller.
-                          </CardDescription>
+                          <CardTitle>{species.name}</CardTitle>
+                          <CardDescription>{species.kind} · {species.rarity}</CardDescription>
                         </div>
-                        <Badge variant="muted">{group.population_count} humans</Badge>
+                        <Badge variant={species.enabled ? "solid" : "muted"}>{species.enabled ? "Enabled" : "Disabled"}</Badge>
                       </div>
                     </CardHeader>
-                    <CardContent className="space-y-4">
-                      <LabeledField label="Population count">
-                        <Input
-                          type="number"
-                          min="1"
-                          max="48"
-                          value={group.population_count}
-                          onChange={(event) => onUpdatePopulation(group.id, Number(event.target.value))}
-                        />
+                    <CardContent className="grid gap-4 sm:grid-cols-2">
+                      <LabeledField label="Enabled">
+                        <Select value={String(species.enabled)} onValueChange={(value) => onUpdateFauna(species.id, { enabled: value === "true" })}>
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="true">Enabled</SelectItem>
+                            <SelectItem value="false">Disabled</SelectItem>
+                          </SelectContent>
+                        </Select>
                       </LabeledField>
-
-                      <div className="grid gap-3">
-                        {group.humans.map((human) => (
-                          <div key={human.id} className="rounded-3xl border border-white/8 bg-white/[0.03] p-4">
-                            <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)]">
-                              <LabeledField label="Human name">
-                                <Input
-                                  value={human.name}
-                                  onChange={(event) => onUpdateHuman(group.id, human.id, { name: event.target.value })}
-                                />
-                              </LabeledField>
-                              <div className="grid gap-3 sm:grid-cols-3">
-                                <HumanStat label="Open" value={human.personality?.openness ?? 0} />
-                                <HumanStat label="Agree" value={human.personality?.agreeableness ?? 0} />
-                                <HumanStat label="Neuro" value={human.personality?.neuroticism ?? 0} />
-                              </div>
-                            </div>
-                            <div className="mt-3 flex flex-wrap gap-2 text-xs text-zinc-500">
-                              <span>ID {human.id}</span>
-                              <span>Food {human.inventory?.food ?? 0}</span>
-                              <span>Wood {human.inventory?.wood ?? 0}</span>
-                              <span>Stone {human.inventory?.stone ?? 0}</span>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
+                      <LabeledField label="Spawn count">
+                        <Input type="number" min="0" max="200" value={species.count} onChange={(event) => onUpdateFauna(species.id, { count: Number(event.target.value) })} />
+                      </LabeledField>
                     </CardContent>
                   </Card>
                 ))}
               </div>
             </TabsContent>
           </ScrollArea>
+
+          <SheetFooter className="border-t border-white/8 px-6 py-4 sm:justify-between">
+            <div className="text-sm text-zinc-500">
+              Save the setup to persist your WorldBox configuration, or generate immediately to preview the atlas.
+            </div>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={onGenerateWorld} disabled={busy}>Generate world</Button>
+              <Button onClick={onSaveSettings} disabled={busy}>Save settings</Button>
+            </div>
+          </SheetFooter>
         </Tabs>
-
-        <Separator />
-
-        <SheetFooter className="px-6 py-5">
-          <Button variant="secondary" onClick={onSaveSettings} disabled={busy}>
-            Save settings
-          </Button>
-          <Button variant="default" onClick={onGenerateWorld} disabled={busy}>
-            Generate world
-          </Button>
-        </SheetFooter>
       </SheetContent>
     </Sheet>
   );
 }
 
-
-function LabeledField({ label, children }) {
+function ControllerGroup({ title, description, children }) {
   return (
-    <label className="grid gap-2">
-      <span className="text-[11px] uppercase tracking-[0.18em] text-zinc-500">{label}</span>
-      {children}
-    </label>
-  );
-}
-
-
-function HumanStat({ label, value }) {
-  return (
-    <div className="rounded-2xl border border-white/8 bg-black/30 px-3 py-3">
-      <p className="text-[11px] uppercase tracking-[0.18em] text-zinc-500">{label}</p>
-      <p className="mt-1 text-sm font-medium text-zinc-100">{value}</p>
+    <div className="space-y-4">
+      <div>
+        <h3 className="text-base font-semibold text-zinc-100">{title}</h3>
+        <p className="text-sm text-zinc-400">{description}</p>
+      </div>
+      <div className="space-y-4">{children}</div>
     </div>
   );
 }
 
+function ControllerCard({
+  title,
+  subtitle,
+  controller,
+  catalog,
+  opencodeCredentials,
+  onRefreshOpencodeStatus,
+  onRefreshProviderCatalog,
+  onProviderChange,
+  onCredentialChange,
+  onUpdateController,
+  onLaunchProviderLogin
+}) {
+  const provider = controller?.provider ?? "heuristic";
+  const models = catalog?.models?.length ? catalog.models : controller?.availableModels ?? [];
 
-function resolveModelOptions(models, selectedModel) {
-  const options = Array.isArray(models) ? models.filter(Boolean) : [];
-  if (selectedModel && !options.includes(selectedModel)) {
-    return [selectedModel, ...options];
-  }
-  return options;
+  return (
+    <Card className="bg-white/[0.025]">
+      <CardHeader>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <CardTitle>{title}</CardTitle>
+            <CardDescription>{subtitle}. This controller powers all humans in this scope.</CardDescription>
+          </div>
+          <Badge variant="muted">{providerDisplayName(provider)}</Badge>
+        </div>
+      </CardHeader>
+      <CardContent className="grid gap-4 sm:grid-cols-2">
+        <LabeledField label="Provider">
+          <Select value={provider} onValueChange={onProviderChange}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {PROVIDER_OPTIONS.map((option) => (
+                <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </LabeledField>
+
+        <LabeledField label="Model">
+          <Select value={controller?.model || "__empty__"} onValueChange={(value) => onUpdateController({ model: value === "__empty__" ? "" : value })}>
+            <SelectTrigger><SelectValue placeholder="Choose a model" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__empty__">Automatic / none</SelectItem>
+              {models.map((model) => (
+                <SelectItem key={model} value={model}>{model}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </LabeledField>
+
+        {provider === "opencode" ? (
+          <>
+            <LabeledField label="OpenCode credential">
+              <Select value={controller?.opencodeProvider || "__empty__"} onValueChange={(value) => onCredentialChange(value === "__empty__" ? "" : value)}>
+                <SelectTrigger><SelectValue placeholder="Choose credential" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__empty__">Default credential</SelectItem>
+                  {opencodeCredentials.map((credential) => (
+                    <SelectItem key={credential} value={credential}>{credential}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </LabeledField>
+            <div className="flex flex-wrap items-end gap-2 sm:col-span-2">
+              <Button variant="outline" onClick={() => onLaunchProviderLogin("opencode")}>
+                <KeyRound className="size-4" />
+                Login
+              </Button>
+              <Button variant="outline" onClick={onRefreshOpencodeStatus}>Refresh credentials</Button>
+              <Button variant="outline" onClick={() => onRefreshProviderCatalog("opencode", controller?.opencodeProvider ?? "")}>Refresh models</Button>
+            </div>
+          </>
+        ) : null}
+
+        {providerUsesLogin(provider) && provider !== "opencode" ? (
+          <div className="flex flex-wrap items-end gap-2 sm:col-span-2">
+            <Button variant="outline" onClick={() => onLaunchProviderLogin(provider)}>
+              <KeyRound className="size-4" />
+              Login
+            </Button>
+            <Button variant="outline" onClick={() => onRefreshProviderCatalog(provider, "")}>Refresh models</Button>
+          </div>
+        ) : null}
+
+        {providerUsesApiKey(provider) ? (
+          <LabeledField label="API key">
+            <Input
+              type="password"
+              value={controller?.apiKey ?? ""}
+              placeholder="Enter API key"
+              onChange={(event) => onUpdateController({ apiKey: event.target.value })}
+            />
+          </LabeledField>
+        ) : null}
+
+        {providerSupportsBaseUrl(provider) ? (
+          <LabeledField label="Base URL">
+            <Input
+              value={controller?.baseUrl ?? ""}
+              placeholder="Optional custom endpoint"
+              onChange={(event) => onUpdateController({ baseUrl: event.target.value })}
+            />
+          </LabeledField>
+        ) : null}
+
+        <div className="sm:col-span-2">
+          <LabeledField label="Manual model override">
+            <Input
+              value={controller?.model ?? ""}
+              placeholder="Optional custom model id"
+              onChange={(event) => onUpdateController({ model: event.target.value })}
+            />
+          </LabeledField>
+        </div>
+      </CardContent>
+    </Card>
+  );
 }
 
-
-function resolveFallbackModels(provider) {
-  if (provider === "gemini-cli") {
-    return GEMINI_MODELS;
-  }
-  if (provider === "gemini-api") {
-    return GEMINI_API_MODELS;
-  }
-  if (provider === "openai") {
-    return OPENAI_MODELS;
-  }
-  if (provider === "anthropic") {
-    return ANTHROPIC_MODELS;
-  }
-  return [];
-}
-
-
-function resolveAuthStatus(controller, catalog) {
-  if (DIRECT_API_PROVIDERS.includes(controller.provider)) {
-    return controller.apiKey ? "configured" : "api-key-required";
-  }
-  if (controller.provider === "gemini-cli") {
-    return controller.apiKey ? "configured" : (catalog.auth_status ?? "cli-login-or-api-key");
-  }
-  return catalog.auth_status ?? (controller.provider === "heuristic" ? "local" : "pending");
+function LabeledField({ label, children }) {
+  return (
+    <label className="grid gap-1.5">
+      <span className="text-[11px] uppercase tracking-[0.18em] text-zinc-500">{label}</span>
+      {children}
+    </label>
+  );
 }

@@ -2,239 +2,39 @@
   "world": {
     "seed": 2232321,
     "generatorPreset": "grand-continent",
-    "width": 128,
-    "height": 128,
+    "width": 160,
+    "height": 160,
     "coastlineBias": 58,
     "riverCount": 8,
     "settlementDensity": 18,
     "landmarkDensity": 16,
+    "biomeDensity": 62,
+    "faunaDensity": 54,
+    "kingdomGrowthIntensity": 60,
     "civilizationCount": 3
   },
-  "groups": [
+  "races": [
     {
-      "id": "red",
-      "name": "Crimson Reach",
-      "color": "#dd6f6a",
+      "id": "human",
+      "name": "Humans",
+      "enabled": true,
+      "auto_seed_count": 1,
+      "starting_population": 18,
+      "color": "#d9b891",
+      "biome_affinity": [
+        "grassland",
+        "fertile-plains",
+        "meadow",
+        "coast"
+      ],
       "culture": [
         {
           "category": "norm",
-          "element": "River Pact",
-          "description": "Builders who reconnect cut-off lands are honored at dusk.",
-          "strength": 82
-        }
-      ],
-      "population_count": 2,
-      "controller": {
-        "provider": "opencode",
-        "model": "opencode/minimax-m2.5-free",
-        "apiKey": "",
-        "googleApiKey": "",
-        "authMode": "existing-cli-auth",
-        "googleCloudProject": "",
-        "useVertex": false,
-        "opencodeProvider": "",
-        "cliHome": "",
-        "timeoutSeconds": 120,
-        "baseUrl": "",
-        "availableModels": [
-          "opencode/big-pickle",
-          "opencode/gpt-5-nano",
-          "opencode/mimo-v2-omni-free",
-          "opencode/mimo-v2-pro-free",
-          "opencode/minimax-m2.5-free",
-          "opencode/nemotron-3-super-free"
-        ],
-        "supportsModelListing": true,
-        "supportsManualModelEntry": true
-      },
-      "humans": [
-        {
-          "id": "ada",
-          "name": "Ada",
-          "group_id": "red",
-          "personality": {
-            "openness": 8,
-            "conscientiousness": 7,
-            "extraversion": 5,
-            "agreeableness": 8,
-            "neuroticism": 3
-          },
-          "emotions": {
-            "Joy": 4,
-            "Sadness": 2,
-            "Fear": 1,
-            "Anger": 1,
-            "Disgust": 0,
-            "Surprise": 3
-          },
-          "needs": {
-            "Survival": 5,
-            "Safety": 4,
-            "Belonging": 5,
-            "Esteem": 4,
-            "Self_Actualization": 4
-          },
-          "inventory": {
-            "food": 4,
-            "wood": 3,
-            "stone": 1
-          },
-          "health": 10,
-          "alive": true,
-          "last_reasoned_tick": 0
-        },
-        {
-          "id": "orin",
-          "name": "Orin",
-          "group_id": "red",
-          "personality": {
-            "openness": 6,
-            "conscientiousness": 8,
-            "extraversion": 4,
-            "agreeableness": 7,
-            "neuroticism": 4
-          },
-          "emotions": {
-            "Joy": 3,
-            "Sadness": 2,
-            "Fear": 2,
-            "Anger": 1,
-            "Disgust": 0,
-            "Surprise": 2
-          },
-          "needs": {
-            "Survival": 4,
-            "Safety": 5,
-            "Belonging": 4,
-            "Esteem": 5,
-            "Self_Actualization": 3
-          },
-          "inventory": {
-            "food": 3,
-            "wood": 2,
-            "stone": 2
-          },
-          "health": 10,
-          "alive": true,
-          "last_reasoned_tick": -1
-        }
-      ]
-    },
-    {
-      "id": "blue",
-      "name": "Azure House",
-      "color": "#6aa8e7",
-      "culture": [
-        {
-          "category": "ritual",
-          "element": "Harbor Supper",
-          "description": "Food is shared after every safe return from the coast.",
+          "element": "Harbor Assembly",
+          "description": "Humans gather by torchlight to decide roads, markets, and treaties.",
           "strength": 76
         }
       ],
-      "population_count": 2,
-      "controller": {
-        "provider": "opencode",
-        "model": "opencode/minimax-m2.5-free",
-        "apiKey": "",
-        "googleApiKey": "",
-        "authMode": "existing-cli-auth",
-        "googleCloudProject": "",
-        "useVertex": false,
-        "opencodeProvider": "",
-        "cliHome": "",
-        "timeoutSeconds": 120,
-        "baseUrl": "",
-        "availableModels": [],
-        "supportsModelListing": true,
-        "supportsManualModelEntry": true
-      },
-      "humans": [
-        {
-          "id": "bo",
-          "name": "Bo",
-          "group_id": "blue",
-          "personality": {
-            "openness": 5,
-            "conscientiousness": 6,
-            "extraversion": 7,
-            "agreeableness": 6,
-            "neuroticism": 4
-          },
-          "emotions": {
-            "Joy": 5,
-            "Sadness": 1,
-            "Fear": 2,
-            "Anger": 1,
-            "Disgust": 0,
-            "Surprise": 2
-          },
-          "needs": {
-            "Survival": 4,
-            "Safety": 3,
-            "Belonging": 6,
-            "Esteem": 4,
-            "Self_Actualization": 5
-          },
-          "inventory": {
-            "food": 3,
-            "wood": 1,
-            "stone": 2
-          },
-          "health": 10,
-          "alive": true,
-          "last_reasoned_tick": 0
-        },
-        {
-          "id": "marin",
-          "name": "Marin",
-          "group_id": "blue",
-          "personality": {
-            "openness": 7,
-            "conscientiousness": 5,
-            "extraversion": 6,
-            "agreeableness": 7,
-            "neuroticism": 3
-          },
-          "emotions": {
-            "Joy": 4,
-            "Sadness": 1,
-            "Fear": 2,
-            "Anger": 1,
-            "Disgust": 0,
-            "Surprise": 4
-          },
-          "needs": {
-            "Survival": 5,
-            "Safety": 4,
-            "Belonging": 5,
-            "Esteem": 4,
-            "Self_Actualization": 6
-          },
-          "inventory": {
-            "food": 2,
-            "wood": 2,
-            "stone": 1
-          },
-          "health": 10,
-          "alive": true,
-          "last_reasoned_tick": -1
-        }
-      ]
-    },
-    {
-      "id": "gold",
-      "name": "Verdant Crown",
-      "color": "#d8bf67",
-      "culture": [
-        {
-          "category": "taboo",
-          "element": "Silent Peaks",
-          "description": "Mountain sanctuaries should not be disturbed without council approval.",
-          "strength": 71
-        }
-      ],
-      "population_count": 2,
       "controller": {
         "provider": "heuristic",
         "model": "",
@@ -251,78 +51,339 @@
         "supportsModelListing": false,
         "supportsManualModelEntry": false
       },
-      "humans": [
+      "kingdom_name_pool": [
+        "Amber Crown",
+        "Harbor March",
+        "Silver Reach",
+        "Sunfield Pact",
+        "Ivory Quay"
+      ],
+      "human_name_pool": [
+        "Ada",
+        "Marin",
+        "Orin",
+        "Suri",
+        "Bo",
+        "Lio",
+        "Mira",
+        "Juno",
+        "Cato",
+        "Tala"
+      ],
+      "personality_bias": {
+        "openness": 5,
+        "conscientiousness": 5,
+        "extraversion": 5,
+        "agreeableness": 5,
+        "neuroticism": 3
+      },
+      "default_inventory": {
+        "food": 4,
+        "wood": 3,
+        "stone": 2
+      }
+    },
+    {
+      "id": "orc",
+      "name": "Orcs",
+      "enabled": true,
+      "auto_seed_count": 1,
+      "starting_population": 2,
+      "color": "#c97162",
+      "biome_affinity": [
+        "scrub",
+        "desert",
+        "volcanic",
+        "highland-frontier"
+      ],
+      "culture": [
         {
-          "id": "suri",
-          "name": "Suri",
-          "group_id": "gold",
-          "personality": {
-            "openness": 9,
-            "conscientiousness": 6,
-            "extraversion": 4,
-            "agreeableness": 5,
-            "neuroticism": 2
-          },
-          "emotions": {
-            "Joy": 5,
-            "Sadness": 1,
-            "Fear": 1,
-            "Anger": 0,
-            "Disgust": 0,
-            "Surprise": 5
-          },
-          "needs": {
-            "Survival": 4,
-            "Safety": 4,
-            "Belonging": 3,
-            "Esteem": 5,
-            "Self_Actualization": 7
-          },
-          "inventory": {
-            "food": 3,
-            "wood": 2,
-            "stone": 2
-          },
-          "health": 10,
-          "alive": true,
-          "last_reasoned_tick": 0
-        },
-        {
-          "id": "cael",
-          "name": "Cael",
-          "group_id": "gold",
-          "personality": {
-            "openness": 6,
-            "conscientiousness": 7,
-            "extraversion": 5,
-            "agreeableness": 5,
-            "neuroticism": 3
-          },
-          "emotions": {
-            "Joy": 3,
-            "Sadness": 2,
-            "Fear": 2,
-            "Anger": 1,
-            "Disgust": 0,
-            "Surprise": 3
-          },
-          "needs": {
-            "Survival": 4,
-            "Safety": 5,
-            "Belonging": 4,
-            "Esteem": 4,
-            "Self_Actualization": 5
-          },
-          "inventory": {
-            "food": 2,
-            "wood": 3,
-            "stone": 2
-          },
-          "health": 10,
-          "alive": true,
-          "last_reasoned_tick": -1
+          "category": "norm",
+          "element": "War Drum Oath",
+          "description": "Orc councils rally around force, loyalty, and frontier honor.",
+          "strength": 81
         }
-      ]
+      ],
+      "controller": {
+        "provider": "heuristic",
+        "model": "",
+        "apiKey": "",
+        "googleApiKey": "",
+        "authMode": "existing-cli-auth",
+        "googleCloudProject": "",
+        "useVertex": false,
+        "opencodeProvider": "",
+        "cliHome": "",
+        "timeoutSeconds": 120,
+        "baseUrl": "",
+        "availableModels": [],
+        "supportsModelListing": false,
+        "supportsManualModelEntry": false
+      },
+      "kingdom_name_pool": [
+        "Ashmaw Clan",
+        "Red Tusk Host",
+        "Basalt March",
+        "Iron Howl",
+        "Cinder Banner"
+      ],
+      "human_name_pool": [
+        "Gor",
+        "Maka",
+        "Ruk",
+        "Tharn",
+        "Vorga",
+        "Dru",
+        "Krag",
+        "Skar",
+        "Urla",
+        "Mog"
+      ],
+      "personality_bias": {
+        "openness": 3,
+        "conscientiousness": 4,
+        "extraversion": 6,
+        "agreeableness": 2,
+        "neuroticism": 4
+      },
+      "default_inventory": {
+        "food": 3,
+        "wood": 2,
+        "stone": 3
+      }
+    },
+    {
+      "id": "elf",
+      "name": "Elves",
+      "enabled": true,
+      "auto_seed_count": 1,
+      "starting_population": 14,
+      "color": "#6fbd98",
+      "biome_affinity": [
+        "forest",
+        "jungle",
+        "grove",
+        "meadow"
+      ],
+      "culture": [
+        {
+          "category": "ritual",
+          "element": "Canopy Accord",
+          "description": "Elves treat forest stewardship, patience, and harmony as sacred law.",
+          "strength": 84
+        }
+      ],
+      "controller": {
+        "provider": "heuristic",
+        "model": "",
+        "apiKey": "",
+        "googleApiKey": "",
+        "authMode": "existing-cli-auth",
+        "googleCloudProject": "",
+        "useVertex": false,
+        "opencodeProvider": "",
+        "cliHome": "",
+        "timeoutSeconds": 120,
+        "baseUrl": "",
+        "availableModels": [],
+        "supportsModelListing": false,
+        "supportsManualModelEntry": false
+      },
+      "kingdom_name_pool": [
+        "Verdant Choir",
+        "Moonleaf Vale",
+        "Canopy Accord",
+        "Silver Root",
+        "Whispering Bough"
+      ],
+      "human_name_pool": [
+        "Ael",
+        "Lira",
+        "Thalen",
+        "Nyra",
+        "Faen",
+        "Ilya",
+        "Serin",
+        "Elar",
+        "Mirael",
+        "Tovan"
+      ],
+      "personality_bias": {
+        "openness": 7,
+        "conscientiousness": 5,
+        "extraversion": 4,
+        "agreeableness": 7,
+        "neuroticism": 2
+      },
+      "default_inventory": {
+        "food": 4,
+        "wood": 4,
+        "stone": 1
+      }
+    },
+    {
+      "id": "dwarf",
+      "name": "Dwarves",
+      "enabled": true,
+      "auto_seed_count": 1,
+      "starting_population": 15,
+      "color": "#9fa7c8",
+      "biome_affinity": [
+        "alpine",
+        "mountain",
+        "crystal",
+        "highland"
+      ],
+      "culture": [
+        {
+          "category": "ritual",
+          "element": "Foundry Vigil",
+          "description": "Dwarves honor stonecraft, mining, and lineage through shared forges.",
+          "strength": 83
+        }
+      ],
+      "controller": {
+        "provider": "heuristic",
+        "model": "",
+        "apiKey": "",
+        "googleApiKey": "",
+        "authMode": "existing-cli-auth",
+        "googleCloudProject": "",
+        "useVertex": false,
+        "opencodeProvider": "",
+        "cliHome": "",
+        "timeoutSeconds": 120,
+        "baseUrl": "",
+        "availableModels": [],
+        "supportsModelListing": false,
+        "supportsManualModelEntry": false
+      },
+      "kingdom_name_pool": [
+        "Iron Hall",
+        "Granite Crown",
+        "Deepforge",
+        "Crystal Bastion",
+        "Emberdelve"
+      ],
+      "human_name_pool": [
+        "Brom",
+        "Kelda",
+        "Torin",
+        "Marn",
+        "Dagna",
+        "Fenn",
+        "Korin",
+        "Bera",
+        "Rurik",
+        "Tova"
+      ],
+      "personality_bias": {
+        "openness": 4,
+        "conscientiousness": 7,
+        "extraversion": 3,
+        "agreeableness": 5,
+        "neuroticism": 3
+      },
+      "default_inventory": {
+        "food": 3,
+        "wood": 1,
+        "stone": 4
+      }
     }
-  ]
+  ],
+  "starter_kingdoms": [
+    {
+      "id": "starter-01",
+      "name": "Humans Kingdom 1",
+      "race_kind": "human",
+      "color": "#d9b891",
+      "population": 14,
+      "culture": [
+        {
+          "category": "norm",
+          "element": "Harbor Assembly",
+          "description": "Humans gather by torchlight to decide roads, markets, and treaties.",
+          "strength": 76
+        }
+      ],
+      "controller": {
+        "provider": "heuristic",
+        "model": "",
+        "apiKey": "",
+        "googleApiKey": "",
+        "authMode": "existing-cli-auth",
+        "googleCloudProject": "",
+        "useVertex": false,
+        "opencodeProvider": "",
+        "cliHome": "",
+        "timeoutSeconds": 120,
+        "baseUrl": "",
+        "availableModels": [],
+        "supportsModelListing": false,
+        "supportsManualModelEntry": false
+      },
+      "manual_position": false,
+      "x": null,
+      "y": null
+    }
+  ],
+  "fauna": {
+    "density": 54,
+    "species": [
+      {
+        "id": "sheep",
+        "name": "Sheep",
+        "kind": "grazer",
+        "rarity": "common",
+        "color": "#f2eee8",
+        "enabled": true,
+        "count": 18
+      },
+      {
+        "id": "cows",
+        "name": "Cattle",
+        "kind": "grazer",
+        "rarity": "common",
+        "color": "#c79b7b",
+        "enabled": true,
+        "count": 12
+      },
+      {
+        "id": "chickens",
+        "name": "Chickens",
+        "kind": "grazer",
+        "rarity": "common",
+        "color": "#f0d678",
+        "enabled": true,
+        "count": 14
+      },
+      {
+        "id": "wolves",
+        "name": "Wolves",
+        "kind": "predator",
+        "rarity": "uncommon",
+        "color": "#7d8494",
+        "enabled": true,
+        "count": 9
+      },
+      {
+        "id": "bears",
+        "name": "Bears",
+        "kind": "predator",
+        "rarity": "uncommon",
+        "color": "#735947",
+        "enabled": true,
+        "count": 5
+      },
+      {
+        "id": "dragons",
+        "name": "Dragons",
+        "kind": "apex",
+        "rarity": "rare",
+        "color": "#b35f5f",
+        "enabled": true,
+        "count": 1
+      }
+    ]
+  }
 }

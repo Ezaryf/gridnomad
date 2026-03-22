@@ -11,6 +11,8 @@ from gridnomad.core.culture import CultureStore
 from gridnomad.core.memory import MemoryStore
 from gridnomad.core.models import (
     AgentState,
+    AnimalUnitState,
+    BattleState,
     CommunicationMessage,
     DecisionPayload,
     Emotions,
@@ -128,6 +130,8 @@ class Simulation:
                         metadata=message.to_dict(),
                     )
                 )
+
+        tick_events.extend(self._update_worldbox_state(tick_events))
 
         for event in tick_events:
             self._record_event(event)
@@ -752,6 +756,340 @@ class Simulation:
                     continue
                 if agent.faction_id == event.faction_id or agent.faction_id == target_faction_id:
                     self.memory_store.add_event(agent.id, event.description)
+
+    def _update_worldbox_state(self, tick_events: list[SimulationEvent]) -> list[SimulationEvent]:
+        produced: list[SimulationEvent] = []
+        self._refresh_population_and_cities()
+        produced.extend(self._step_animals())
+        if self.world.tick % 6 == 0:
+            produced.extend(self._maybe_found_cities())
+        produced.extend(self._refresh_battles(tick_events + produced))
+        return produced
+
+    def _refresh_population_and_cities(self) -> None:
+        for city in self.world.cities.values():
+            city.population = 0
+        for kingdom in self.world.kingdoms.values():
+            kingdom.population = 0
+            kingdom.city_ids = []
+        for city in self.world.cities.values():
+            kingdom = self.world.kingdoms.get(city.kingdom_id)
+            if kingdom is not None:
+                kingdom.city_ids.append(city.id)
+        for agent in self.world.agents.values():
+            if not agent.alive:
+                continue
+            kingdom = self.world.kingdoms.get(agent.faction_id)
+            if kingdom is not None:
+                kingdom.population += 1
+                if kingdom.leader_id is None and agent.role == "leader":
+                    kingdom.leader_id = agent.id
+            if agent.home_city_id and agent.home_city_id in self.world.cities:
+                self.world.cities[agent.home_city_id].population += 1
+            else:
+                city = self._nearest_city(agent.x, agent.y, agent.faction_id)
+                if city is not None:
+                    agent.home_city_id = city.id
+                    city.population += 1
+        for kingdom in self.world.kingdoms.values():
+            if kingdom.capital_city_id is None and kingdom.city_ids:
+                kingdom.capital_city_id = kingdom.city_ids[0]
+            if kingdom.id in self.world.factions:
+                self.world.factions[kingdom.id].leader_id = kingdom.leader_id
+                self.world.factions[kingdom.id].capital_settlement_id = kingdom.capital_city_id
+
+    def _maybe_found_cities(self) -> list[SimulationEvent]:
+        produced: list[SimulationEvent] = []
+        growth_pressure = max(1, self.config.kingdom_growth_intensity // 20)
+        next_city_index = len(self.world.cities) + 1
+        next_structure_index = len(self.world.structures) + 1
+        for kingdom in self.world.kingdoms.values():
+            if kingdom.population < (10 + (len(kingdom.city_ids) * 8)):
+                continue
+            if len(kingdom.city_ids) >= growth_pressure + 1:
+                continue
+            candidate = self._best_city_site(kingdom.id)
+            if candidate is None:
+                continue
+            x, y = candidate
+            city_id = f"{kingdom.id}-city-{next_city_index:02d}"
+            next_city_index += 1
+            city = self.world.cities[city_id] = self._create_city_state(city_id, kingdom.id, x, y)
+            kingdom.city_ids.append(city_id)
+            if kingdom.capital_city_id is None:
+                kingdom.capital_city_id = city_id
+            self.world.settlements.append(
+                {
+                    "id": city.id,
+                    "name": city.name,
+                    "kind": "frontier",
+                    "x": city.x,
+                    "y": city.y,
+                    "owner_faction": kingdom.id,
+                    "region_id": self.world.get_tile(city.x, city.y).region_id,
+                    "footprint": [dict(item) for item in city.footprint],
+                }
+            )
+            for segment in city.footprint:
+                structure_id = f"{city_id}-structure-{next_structure_index:02d}"
+                next_structure_index += 1
+                self.world.structures[structure_id] = self._create_structure_state(
+                    structure_id,
+                    kingdom.id,
+                    city.id,
+                    int(segment["x"]),
+                    int(segment["y"]),
+                    str(segment.get("district_kind", "district")),
+                )
+                tile = self.world.get_tile(int(segment["x"]), int(segment["y"]))
+                tile.owner_faction = kingdom.id
+                tile.settlement_id = city.id
+                tile.feature = "district" if not segment.get("is_core") else "settlement"
+            produced.append(
+                self._event(
+                    kind="CITY_FOUNDED",
+                    description=f"{kingdom.name} founded {city.name}.",
+                    success=True,
+                    faction_id=kingdom.id,
+                    metadata={"city_id": city.id, "x": city.x, "y": city.y},
+                )
+            )
+        return produced
+
+    def _best_city_site(self, kingdom_id: str) -> tuple[int, int] | None:
+        owned_tiles: list[tuple[int, int, int]] = []
+        existing = {(city.x, city.y) for city in self.world.cities.values() if city.kingdom_id == kingdom_id}
+        for y, row in enumerate(self.world.tiles):
+            for x, tile in enumerate(row):
+                if tile.owner_faction != kingdom_id or tile.terrain == TileType.WATER or not tile.passable:
+                    continue
+                if (x, y) in existing:
+                    continue
+                if any(abs(city_x - x) + abs(city_y - y) < 8 for city_x, city_y in existing):
+                    continue
+                owned_tiles.append((tile.city_score, x, y))
+        if not owned_tiles:
+            return None
+        owned_tiles.sort(reverse=True)
+        _, x, y = owned_tiles[0]
+        return x, y
+
+    def _create_city_state(self, city_id: str, kingdom_id: str, x: int, y: int):
+        kingdom = self.world.kingdoms[kingdom_id]
+        footprint = [
+            {"x": x, "y": y, "district_kind": "core", "is_core": True},
+            {"x": x + 1 if x + 1 < self.world.width else x - 1, "y": y, "district_kind": "ward", "is_core": False},
+            {"x": x, "y": y + 1 if y + 1 < self.world.height else y - 1, "district_kind": "farm", "is_core": False},
+        ]
+        from gridnomad.core.models import CityState
+
+        return CityState(
+            id=city_id,
+            name=f"{kingdom.name} Hold {len(kingdom.city_ids) + 1}",
+            kingdom_id=kingdom_id,
+            race_kind=kingdom.race_kind,
+            x=x,
+            y=y,
+            population=0,
+            level=1,
+            footprint=footprint,
+            district_kinds=[str(item["district_kind"]) for item in footprint],
+        )
+
+    def _create_structure_state(self, structure_id: str, kingdom_id: str, city_id: str, x: int, y: int, kind: str):
+        from gridnomad.core.models import StructureState
+
+        return StructureState(
+            id=structure_id,
+            kind=kind,
+            x=x,
+            y=y,
+            kingdom_id=kingdom_id,
+            city_id=city_id,
+            integrity=10,
+        )
+
+    def _step_animals(self) -> list[SimulationEvent]:
+        produced: list[SimulationEvent] = []
+        newborns: list[AnimalUnitState] = []
+        next_index = len(self.world.animals) + 1
+        for animal in sorted(self.world.animals.values(), key=lambda item: item.id):
+            if not animal.alive:
+                continue
+            animal.hunger = min(10, animal.hunger + 1)
+            if animal.kind in {"predator", "apex"}:
+                target = self._nearest_human(animal.x, animal.y, radius=2)
+                if target is not None and abs(target.x - animal.x) + abs(target.y - animal.y) <= 1:
+                    target.health = max(0, target.health - (3 if animal.kind == "apex" else 1))
+                    animal.hunger = max(0, animal.hunger - 3)
+                    produced.append(
+                        self._event(
+                            kind="FAUNA_ATTACK",
+                            description=f"{animal.name} attacked {target.name}.",
+                            success=True,
+                            actor_id=target.id,
+                            faction_id=target.faction_id,
+                            metadata={"animal_id": animal.id, "species": animal.species},
+                        )
+                    )
+                    if target.health == 0:
+                        target.alive = False
+                        produced.append(
+                            self._event(
+                                kind="DEATH",
+                                description=f"{target.name} was killed by {animal.name}.",
+                                success=False,
+                                actor_id=target.id,
+                                faction_id=target.faction_id,
+                                metadata={"animal_id": animal.id},
+                            )
+                        )
+                    continue
+                self._move_animal_toward(
+                    animal,
+                    None if target is None else target.x,
+                    None if target is None else target.y,
+                )
+            else:
+                tile = self.world.get_tile(animal.x, animal.y)
+                if tile.fertility >= 45 or tile.resource == "food":
+                    animal.hunger = max(0, animal.hunger - 2)
+                self._wander_animal(animal)
+                if animal.hunger <= 3 and self.world.tick % 9 == 0 and next_index % 2 == 0:
+                    spawn = self._adjacent_open_tile(animal.x, animal.y)
+                    if spawn is not None:
+                        newborns.append(
+                            AnimalUnitState(
+                                id=f"{animal.species}-{next_index:04d}",
+                                species=animal.species,
+                                name=animal.name,
+                                kind=animal.kind,
+                                x=spawn[0],
+                                y=spawn[1],
+                                hunger=4,
+                                energy=6,
+                            )
+                        )
+                        next_index += 1
+            if animal.hunger >= 10:
+                animal.alive = False
+                produced.append(
+                    self._event(
+                        kind="FAUNA_DEATH",
+                        description=f"{animal.name} succumbed to hunger.",
+                        success=False,
+                        metadata={"animal_id": animal.id, "species": animal.species},
+                    )
+                )
+        for animal in newborns:
+            self.world.animals[animal.id] = animal
+            produced.append(
+                self._event(
+                    kind="FAUNA_BIRTH",
+                    description=f"A new {animal.species} was born in the wild.",
+                    success=True,
+                    metadata={"animal_id": animal.id, "species": animal.species, "x": animal.x, "y": animal.y},
+                )
+            )
+        self.world.fauna_events.extend([event.to_dict() for event in produced if event.kind.startswith("FAUNA_")])
+        return produced
+
+    def _nearest_human(self, x: int, y: int, radius: int) -> AgentState | None:
+        candidates = [
+            agent
+            for agent in self.world.agents.values()
+            if agent.alive and abs(agent.x - x) + abs(agent.y - y) <= radius
+        ]
+        if not candidates:
+            return None
+        return min(candidates, key=lambda item: (abs(item.x - x) + abs(item.y - y), item.id))
+
+    def _move_animal_toward(self, animal: AnimalUnitState, target_x: int | None, target_y: int | None) -> None:
+        if target_x is None or target_y is None:
+            self._wander_animal(animal)
+            return
+        options = []
+        for dx, dy in MOVE_DELTAS.values():
+            nx = animal.x + dx
+            ny = animal.y + dy
+            if not self.world.in_bounds(nx, ny):
+                continue
+            tile = self.world.get_tile(nx, ny)
+            if not tile.passable or self.world.position_occupied(nx, ny):
+                continue
+            options.append((abs(target_x - nx) + abs(target_y - ny), nx, ny))
+        if not options:
+            return
+        _, animal.x, animal.y = min(options)
+
+    def _wander_animal(self, animal: AnimalUnitState) -> None:
+        options = []
+        for dx, dy in MOVE_DELTAS.values():
+            nx = animal.x + dx
+            ny = animal.y + dy
+            if not self.world.in_bounds(nx, ny):
+                continue
+            tile = self.world.get_tile(nx, ny)
+            if not tile.passable or self.world.position_occupied(nx, ny):
+                continue
+            options.append((tile.fertility, self.rng.random(), nx, ny))
+        if not options:
+            return
+        options.sort(reverse=True)
+        _, _, animal.x, animal.y = options[0]
+
+    def _adjacent_open_tile(self, x: int, y: int) -> tuple[int, int] | None:
+        for dx, dy in MOVE_DELTAS.values():
+            nx = x + dx
+            ny = y + dy
+            if not self.world.in_bounds(nx, ny):
+                continue
+            tile = self.world.get_tile(nx, ny)
+            if tile.passable and not self.world.position_occupied(nx, ny):
+                return nx, ny
+        return None
+
+    def _refresh_battles(self, events: list[SimulationEvent]) -> list[SimulationEvent]:
+        produced: list[SimulationEvent] = []
+        next_battles: dict[str, BattleState] = {}
+        for event in events:
+            if event.kind != "ATTACK" or not event.success or event.actor_id is None or event.target_agent_id is None:
+                continue
+            attacker = self.world.agents.get(event.actor_id)
+            defender = self.world.agents.get(event.target_agent_id)
+            if attacker is None or defender is None or attacker.faction_id == defender.faction_id:
+                continue
+            battle_id = f"battle-{min(attacker.id, defender.id)}-{max(attacker.id, defender.id)}"
+            next_battles[battle_id] = BattleState(
+                id=battle_id,
+                x=defender.x,
+                y=defender.y,
+                attacker_kingdom_id=attacker.faction_id,
+                defender_kingdom_id=defender.faction_id,
+                intensity=4,
+                tick_started=self.world.tick,
+            )
+        for battle in self.world.battles.values():
+            if self.world.tick - battle.tick_started <= 2:
+                battle.intensity = max(1, battle.intensity - 1)
+                next_battles[battle.id] = battle
+        self.world.battles = next_battles
+        if next_battles:
+            produced.append(
+                self._event(
+                    kind="BATTLE_UPDATE",
+                    description=f"{len(next_battles)} battle zone(s) are active.",
+                    success=True,
+                    metadata={"battle_count": len(next_battles)},
+                )
+            )
+        return produced
+
+    def _nearest_city(self, x: int, y: int, kingdom_id: str):
+        cities = [city for city in self.world.cities.values() if city.kingdom_id == kingdom_id]
+        if not cities:
+            return None
+        return min(cities, key=lambda item: (abs(item.x - x) + abs(item.y - y), item.id))
 
     def _event(
         self,

@@ -17,6 +17,9 @@ class AgentMemoryView:
 class AgentPromptView:
     name: str
     faction: str
+    race_kind: str
+    kingdom_id: str
+    role: str
     personality: object
     emotions: object
     needs: object
@@ -29,6 +32,9 @@ class AgentPromptView:
         return cls(
             name=agent.name,
             faction=agent.faction_id,
+            race_kind=getattr(agent, "race_kind", "human"),
+            kingdom_id=getattr(agent, "kingdom_id", agent.faction_id),
+            role=getattr(agent, "role", "citizen"),
             personality=agent.personality,
             emotions=agent.emotions,
             needs=agent.needs,
@@ -46,7 +52,8 @@ def build_agent_prompt(
     cultural_context: str,
 ) -> str:
     return f"""
-You are {agent.name}, an AI agent living in the pixel world of GridNomad. You belong to the {agent.faction} faction.
+You are {agent.name}, a {agent.race_kind} citizen in the kingdom of {agent.kingdom_id} in the pixel world of GridNomad.
+Your current social role is {agent.role}. Your kingdom may grow cities, farm, trade, fight, and negotiate with rival kingdoms.
 
 ## Your Personality (fixed Big-5 traits, never change):
 - Openness: {agent.personality.openness} (curiosity, creativity)
@@ -66,7 +73,7 @@ You are {agent.name}, an AI agent living in the pixel world of GridNomad. You be
 **Recent events this tick**: {recent_events}
 **Recent civilization messages**: {recent_messages.get("civilization", [])}
 **Recent diplomatic messages**: {recent_messages.get("diplomacy", [])}
-**Your faction's culture**: {cultural_context}
+**Your kingdom's culture**: {cultural_context}
 **Available actions**:
 - MOVE_NORTH / MOVE_SOUTH / MOVE_EAST / MOVE_WEST
 - BUILD_BRIDGE (if near water, can place bridge tile at target coordinates)

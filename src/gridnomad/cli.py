@@ -57,6 +57,9 @@ def run_command(args: argparse.Namespace) -> int:
         river_count_override=args.river_count,
         settlement_density_override=args.settlement_density,
         landmark_density_override=args.landmark_density,
+        biome_density_override=args.biome_density,
+        fauna_density_override=args.fauna_density,
+        kingdom_growth_intensity_override=args.kingdom_growth_intensity,
     )
     adapter = (
         RoutingLLMAdapter.from_path(args.settings, project_dir=Path.cwd())
@@ -97,6 +100,9 @@ def run_stream_command(args: argparse.Namespace) -> int:
         river_count_override=args.river_count,
         settlement_density_override=args.settlement_density,
         landmark_density_override=args.landmark_density,
+        biome_density_override=args.biome_density,
+        fauna_density_override=args.fauna_density,
+        kingdom_growth_intensity_override=args.kingdom_growth_intensity,
     )
     adapter = (
         RoutingLLMAdapter.from_path(args.settings, project_dir=Path.cwd())
@@ -181,6 +187,9 @@ def generate_world_command(args: argparse.Namespace) -> int:
         river_count_override=args.river_count,
         settlement_density_override=args.settlement_density,
         landmark_density_override=args.landmark_density,
+        biome_density_override=args.biome_density,
+        fauna_density_override=args.fauna_density,
+        kingdom_growth_intensity_override=args.kingdom_growth_intensity,
     )
     payload = {
         "ok": True,
@@ -232,4 +241,12 @@ def _add_world_arguments(parser: argparse.ArgumentParser) -> None:
         type=int,
         default=None,
         help="Optional landmark density override.",
+    )
+    parser.add_argument("--biome-density", type=int, default=None, help="Optional biome density override.")
+    parser.add_argument("--fauna-density", type=int, default=None, help="Optional fauna density override.")
+    parser.add_argument(
+        "--kingdom-growth-intensity",
+        type=int,
+        default=None,
+        help="Optional kingdom growth intensity override.",
     )

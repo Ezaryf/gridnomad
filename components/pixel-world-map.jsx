@@ -20,6 +20,7 @@ import {
   settlementPresentation,
   settlementSegments,
   terrainPresentation,
+  terrainTextureKey,
   TILE_SIZE
 } from "@/lib/world-atlas";
 
@@ -28,8 +29,10 @@ export default function PixelWorldMap({
   world,
   overlays,
   selectedTile,
+  selectedHumanId,
   onHoverTile,
-  onSelectTile
+  onSelectTile,
+  onSelectHuman
 }) {
   const stageRef = useRef(null);
   const runtimeRef = useRef(null);
@@ -38,6 +41,7 @@ export default function PixelWorldMap({
   const selectedTileRef = useRef(selectedTile);
   const onHoverRef = useRef(onHoverTile);
   const onSelectRef = useRef(onSelectTile);
+  const onSelectHumanRef = useRef(onSelectHuman);
   const [zoomPercent, setZoomPercent] = useState(0);
   const [hoveredTile, setHoveredTile] = useState(null);
 
@@ -66,6 +70,10 @@ export default function PixelWorldMap({
   }, [onSelectTile]);
 
   useEffect(() => {
+    onSelectHumanRef.current = onSelectHuman;
+  }, [onSelectHuman]);
+
+  useEffect(() => {
     let cancelled = false;
     let cleanup = () => {};
 
@@ -86,7 +94,8 @@ export default function PixelWorldMap({
         Container,
         SCALE_MODES,
         Sprite,
-        TextureStyle
+        TextureStyle,
+        Texture
       } = pixi;
       const { Viewport } = viewportPackage;
 
@@ -123,6 +132,7 @@ export default function PixelWorldMap({
       const propLayer = new Container();
       const settlementLayer = new Container();
       const agentLayer = new Container();
+      const faunaLayer = new Container();
       const fxLayer = new Container();
       const uiLayer = new Container();
 
@@ -134,6 +144,7 @@ export default function PixelWorldMap({
       viewport.addChild(propLayer);
       viewport.addChild(settlementLayer);
       viewport.addChild(agentLayer);
+      viewport.addChild(faunaLayer);
       viewport.addChild(fxLayer);
       viewport.addChild(uiLayer);
 
@@ -164,12 +175,14 @@ export default function PixelWorldMap({
           propLayer,
           settlementLayer,
           agentLayer,
+          faunaLayer,
           fxLayer,
           uiLayer
         },
         hoverRing,
         selectRing,
         agentPositions: new Map(),
+        humanHitTargets: [],
         agentTweens: [],
         animatedGlints: [],
         fogSprites: [],
@@ -209,6 +222,12 @@ export default function PixelWorldMap({
         syncFocusSprites(runtimeRef.current, selectedTileRef.current, null);
       };
       const handlePointerUp = (event) => {
+        const human = pointerToHuman(runtimeRef.current, event);
+        if (human) {
+          onSelectHumanRef.current?.(human);
+          onSelectRef.current?.({ x: human.x, y: human.y });
+          return;
+        }
         const tile = pointerToTile(runtimeRef.current, event);
         if (!tile) {
           return;
@@ -216,9 +235,14 @@ export default function PixelWorldMap({
         onSelectRef.current?.(tile);
       };
 
+      const handleWheel = (e) => {
+        e.preventDefault();
+      };
+
       app.canvas.addEventListener("pointermove", handlePointerMove);
       app.canvas.addEventListener("pointerleave", handlePointerLeave);
       app.canvas.addEventListener("pointerup", handlePointerUp);
+      stageRef.current.addEventListener("wheel", handleWheel, { passive: false });
 
       app.ticker.add((ticker) => animateRuntime(runtime, ticker.deltaMS, setZoomPercent));
 
@@ -227,6 +251,10 @@ export default function PixelWorldMap({
         app.canvas.removeEventListener("pointermove", handlePointerMove);
         app.canvas.removeEventListener("pointerleave", handlePointerLeave);
         app.canvas.removeEventListener("pointerup", handlePointerUp);
+        const stage = stageRef.current;
+        if (stage) {
+          stage.removeEventListener("wheel", handleWheel);
+        }
         runtimeRef.current = null;
         app.destroy(true);
       };
@@ -269,28 +297,28 @@ export default function PixelWorldMap({
   }
 
   return (
-    <div className="relative overflow-hidden rounded-[2rem] border border-white/8 bg-black">
+    <div className="relative h-full w-full overflow-hidden bg-black">
       <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex flex-wrap items-start justify-between gap-3 p-4">
         <div className="pointer-events-auto flex flex-wrap gap-2">
-          <Badge>{world?.seed ?? "..."}</Badge>
-          <Badge variant="muted">{world ? `${world.width} x ${world.height}` : "No world"}</Badge>
-          <Badge variant="muted">{zoomPercent}% zoom</Badge>
-          {hoveredTile ? <Badge variant="muted">{hoveredTile.x}, {hoveredTile.y}</Badge> : null}
+          <Badge className="bg-black/50 backdrop-blur-md">{world?.seed ?? "..."}</Badge>
+          <Badge variant="secondary" className="bg-black/50 backdrop-blur-md">{world ? `${world.width} x ${world.height}` : "No world"}</Badge>
+          <Badge variant="secondary" className="bg-black/50 backdrop-blur-md">{zoomPercent}% zoom</Badge>
+          {hoveredTile ? <Badge variant="secondary" className="bg-black/50 backdrop-blur-md">{hoveredTile.x}, {hoveredTile.y}</Badge> : null}
         </div>
-        <div className="pointer-events-auto flex items-center gap-2 rounded-2xl border border-white/10 bg-black/70 p-2 backdrop-blur-md">
-          <Button size="icon" variant="ghost" onClick={() => nudgeZoom(1.15)}>
-            <Plus className="size-4" />
+        <div className="pointer-events-auto flex items-center gap-2 rounded-2xl border border-white/10 bg-black/50 p-1.5 backdrop-blur-md">
+          <Button size="icon" variant="ghost" className="size-8" onClick={() => nudgeZoom(1.15)}>
+            <Plus className="size-3.5" />
           </Button>
-          <Button size="icon" variant="ghost" onClick={() => nudgeZoom(0.87)}>
-            <Minus className="size-4" />
+          <Button size="icon" variant="ghost" className="size-8" onClick={() => nudgeZoom(0.87)}>
+            <Minus className="size-3.5" />
           </Button>
-          <Button size="icon" variant="ghost" onClick={fitView}>
-            <LocateFixed className="size-4" />
+          <Button size="icon" variant="ghost" className="size-8" onClick={fitView}>
+            <LocateFixed className="size-3.5" />
           </Button>
         </div>
       </div>
 
-      <div ref={stageRef} className="relative min-h-[660px] w-full bg-black sm:min-h-[760px] xl:min-h-[860px]">
+      <div ref={stageRef} className="relative h-full w-full bg-black">
         <div className="pointer-events-none absolute inset-0 z-10 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.06),transparent_24%),linear-gradient(180deg,rgba(255,255,255,0.02),transparent_40%)]" />
       </div>
 
@@ -317,9 +345,13 @@ function renderWorld(runtime, world, overlays, worldSignature) {
   runtime.animatedGlints = [];
 
   const {
-    Container,
-    Sprite
+    Sprite,
+    Texture
   } = runtime.pixi;
+
+  if (!runtime.proceduralTextures) {
+    runtime.proceduralTextures = generateProceduralTextures(runtime);
+  }
   const {
     terrainLayer,
     territoryLayer,
@@ -328,7 +360,8 @@ function renderWorld(runtime, world, overlays, worldSignature) {
     detailLayer,
     propLayer,
     settlementLayer,
-    agentLayer
+    agentLayer,
+    faunaLayer
   } = runtime.layers;
 
   clearLayer(terrainLayer);
@@ -339,6 +372,7 @@ function renderWorld(runtime, world, overlays, worldSignature) {
   clearLayer(propLayer);
   clearLayer(settlementLayer);
   clearLayer(agentLayer);
+  clearLayer(faunaLayer);
 
   runtime.viewport.worldWidth = world.width * TILE_SIZE;
   runtime.viewport.worldHeight = world.height * TILE_SIZE;
@@ -354,40 +388,54 @@ function renderWorld(runtime, world, overlays, worldSignature) {
       const px = tile.x * TILE_SIZE;
       const py = tile.y * TILE_SIZE;
 
-      const base = Sprite.from(terrainPresentation(tile).asset);
       const baseStyle = terrainPresentation(tile);
+      const terrainTexture = runtime.proceduralTextures[terrainTextureKey(tile)] ?? Texture.WHITE;
+      const shift = (tile.height_level || 0) * 2;
+
+      if (shift > 0 && tile.terrain !== "water") {
+        const edge = new Sprite(Texture.WHITE);
+        edge.width = TILE_SIZE;
+        edge.height = TILE_SIZE + shift;
+        edge.x = px;
+        edge.y = py - shift;
+        edge.tint = terrainShadowTint(tile);
+        terrainLayer.addChild(edge);
+      }
+
+      const base = new Sprite(terrainTexture);
+      base.width = TILE_SIZE;
+      base.height = TILE_SIZE;
       base.x = px;
-      base.y = py;
+      base.y = py - shift;
       base.tint = baseStyle.tint;
       terrainLayer.addChild(base);
+
+      if (tile.edge_mask && tile.terrain !== "water") {
+        for (const overlay of coastOverlays(tile.edge_mask)) {
+          const coastSprite = Sprite.from(overlay.asset);
+          coastSprite.x = px + (TILE_SIZE / 2);
+          coastSprite.y = py + (TILE_SIZE / 2) - shift;
+          coastSprite.anchor.set(0.5);
+          coastSprite.rotation = overlay.rotation;
+          coastSprite.alpha = 0.78;
+          detailLayer.addChild(coastSprite);
+        }
+      }
 
       if (overlays?.territories && tile.owner_faction) {
         const territory = Sprite.from(resolveAtlasAsset("overlay-tint"));
         territory.x = px;
-        territory.y = py;
+        territory.y = py - shift;
         territory.tint = factionTint(tile.owner_faction);
         territory.alpha = tile.settlement_id ? 0.11 : 0.085;
         territoryLayer.addChild(territory);
-      }
-
-      if (tile.terrain === "water" && tile.edge_mask) {
-        for (const overlay of coastOverlays(tile.edge_mask)) {
-          const foam = Sprite.from(overlay.asset);
-          foam.x = px + (TILE_SIZE / 2);
-          foam.y = py + (TILE_SIZE / 2);
-          foam.anchor.set(0.5);
-          foam.rotation = overlay.rotation;
-          foam.tint = 0xffffff;
-          foam.alpha = 0.82;
-          fluidLayer.addChild(foam);
-        }
       }
 
       if (tile.river_mask) {
         const river = riverPresentation(tile.river_mask);
         const sprite = Sprite.from(river.asset);
         sprite.x = px + (TILE_SIZE / 2);
-        sprite.y = py + (TILE_SIZE / 2);
+        sprite.y = py + (TILE_SIZE / 2) - shift;
         sprite.anchor.set(0.5);
         sprite.rotation = river.rotation;
         sprite.tint = river.tint;
@@ -399,7 +447,7 @@ function renderWorld(runtime, world, overlays, worldSignature) {
         const road = roadPresentation(tile.road_mask);
         const sprite = Sprite.from(road.asset);
         sprite.x = px + (TILE_SIZE / 2);
-        sprite.y = py + (TILE_SIZE / 2);
+        sprite.y = py + (TILE_SIZE / 2) - shift;
         sprite.anchor.set(0.5);
         sprite.rotation = road.rotation;
         sprite.tint = road.tint;
@@ -412,40 +460,24 @@ function renderWorld(runtime, world, overlays, worldSignature) {
         const decal = decalPresentation(tile.decal);
         const sprite = Sprite.from(decal.asset);
         sprite.x = px;
-        sprite.y = py;
+        sprite.y = py - shift;
         sprite.tint = decal.tint;
-        sprite.alpha = tile.decal === "water-glint" ? 0.72 : 0.5;
+        sprite.alpha = tile.decal === "water-glint" ? 0.5 : 0.22;
         detailLayer.addChild(sprite);
         if (tile.decal === "water-glint") {
           runtime.animatedGlints.push({
             sprite,
-            baseAlpha: 0.52,
+            baseAlpha: 0.4,
             phase: ((tile.x * 13) + (tile.y * 17)) * 0.07
           });
         }
-      }
-
-      if (tile.feature === "forest" && tile.visual_variant === 0) {
-        const forestSprite = Sprite.from(resolveAtlasAsset("prop-tree-cluster"));
-        forestSprite.x = px;
-        forestSprite.y = py;
-        forestSprite.alpha = 0.85;
-        propLayer.addChild(forestSprite);
-      }
-
-      if (tile.feature === "mountain" && tile.visual_variant >= 2) {
-        const mountainSprite = Sprite.from(resolveAtlasAsset("prop-mountain-cluster"));
-        mountainSprite.x = px;
-        mountainSprite.y = py;
-        mountainSprite.alpha = 0.92;
-        propLayer.addChild(mountainSprite);
       }
 
       if (overlays?.resources && tile.resource) {
         const resource = resourcePresentation(tile.resource);
         const sprite = Sprite.from(resource.asset);
         sprite.x = px + 10;
-        sprite.y = py + 10;
+        sprite.y = py + 10 - shift;
         sprite.width = 4;
         sprite.height = 4;
         sprite.tint = resource.tint;
@@ -462,31 +494,48 @@ function renderWorld(runtime, world, overlays, worldSignature) {
     if (prop.kind === "river-trace") {
       continue;
     }
-    const presentation = propPresentation(prop);
-    const sprite = Sprite.from(presentation.asset);
+    const shift = (world.tiles?.[prop.y]?.[prop.x]?.height_level ?? 0) * 2;
+    let sprite;
+    if (prop.kind === "farm") {
+      sprite = new Sprite(runtime.proceduralTextures["farm"]);
+    } else {
+      const presentation = propPresentation(prop);
+      sprite = Sprite.from(presentation.asset);
+      sprite.tint = presentation.tint;
+    }
     sprite.x = prop.x * TILE_SIZE;
-    sprite.y = prop.y * TILE_SIZE;
-    sprite.tint = presentation.tint;
-    sprite.alpha = prop.kind === "ship" ? 0.95 : 0.92;
+    sprite.y = prop.y * TILE_SIZE - shift;
+    sprite.alpha = prop.kind === "ship" ? 0.95 : 0.82;
     propLayer.addChild(sprite);
   }
 
-  for (const settlement of world.settlements ?? []) {
-    for (const segment of settlementSegments(settlement)) {
-      const presentation = settlementPresentation(segment);
-      const sprite = Sprite.from(presentation.asset);
-      sprite.x = segment.x * TILE_SIZE;
-      sprite.y = segment.y * TILE_SIZE;
-      sprite.tint = presentation.tint;
-      sprite.alpha = segment.is_core ? 1 : 0.92;
-      settlementLayer.addChild(sprite);
+  if (overlays?.structures !== false) {
+    for (const settlement of world.settlements ?? []) {
+      for (const segment of settlementSegments(settlement)) {
+        const shift = (world.tiles?.[segment.y]?.[segment.x]?.height_level ?? 0) * 2;
+        const px = segment.x * TILE_SIZE;
+        const py = segment.y * TILE_SIZE - shift;
+
+        const baseSprite = new Sprite(runtime.proceduralTextures["house-base"]);
+        baseSprite.x = px;
+        baseSprite.y = py;
+        settlementLayer.addChild(baseSprite);
+
+        const roofSprite = new Sprite(runtime.proceduralTextures["house-roof"]);
+        roofSprite.x = px;
+        roofSprite.y = py;
+        const ownerFactionId = world.tiles?.[segment.y]?.[segment.x]?.owner_faction;
+        roofSprite.tint = ownerFactionId ? factionTint(ownerFactionId) : 0xef4444;
+        settlementLayer.addChild(roofSprite);
+      }
     }
   }
 
   if (overlays?.humans) {
     const nextAgentPositions = new Map();
+    const nextHumanHitTargets = [];
     const tileSlots = new Map();
-    for (const agent of Object.values(world.agents ?? {})) {
+    for (const agent of Object.values(world.humans ?? world.agents ?? {})) {
       if (agent.alive === false) {
         continue;
       }
@@ -494,9 +543,10 @@ function renderWorld(runtime, world, overlays, worldSignature) {
       const slot = tileSlots.get(tileKey) ?? 0;
       tileSlots.set(tileKey, slot + 1);
       const offset = swarmSlotOffset(slot);
-      const sprite = buildSwarmMarker(Container, Sprite, factionTint(agent.faction_id), slot);
+      const shift = (world.tiles?.[agent.y]?.[agent.x]?.height_level ?? 0) * 2;
+      const sprite = buildHumanMarker(runtime, Sprite, factionTint(agent.faction_id));
       const targetX = (agent.x * TILE_SIZE) + (TILE_SIZE / 2) + offset.x;
-      const targetY = (agent.y * TILE_SIZE) + (TILE_SIZE / 2) + offset.y;
+      const targetY = (agent.y * TILE_SIZE) + (TILE_SIZE / 2) + offset.y - shift;
       const previous = runtime.agentPositions.get(agent.id) ?? { x: targetX, y: targetY };
       sprite.x = previous.x;
       sprite.y = previous.y;
@@ -513,15 +563,258 @@ function renderWorld(runtime, world, overlays, worldSignature) {
         bobAmount: 0.18
       });
       nextAgentPositions.set(agent.id, { x: targetX, y: targetY });
+      nextHumanHitTargets.push({
+        id: agent.id,
+        name: agent.name,
+        faction_id: agent.faction_id,
+        x: agent.x,
+        y: agent.y,
+        worldX: targetX,
+        worldY: targetY,
+        radius: 7
+      });
     }
     runtime.agentPositions = nextAgentPositions;
+    runtime.humanHitTargets = nextHumanHitTargets;
   } else {
     runtime.agentPositions = new Map();
+    runtime.humanHitTargets = [];
+  }
+
+  if (overlays?.fauna) {
+    for (const animal of Object.values(world.animals ?? {})) {
+      if (animal.alive === false) {
+        continue;
+      }
+      const shift = (world.tiles?.[animal.y]?.[animal.x]?.height_level ?? 0) * 2;
+      const sprite = buildAnimalMarker(runtime, Sprite, animalTint(animal.species));
+      sprite.x = (animal.x * TILE_SIZE) + (TILE_SIZE / 2);
+      sprite.y = (animal.y * TILE_SIZE) + (TILE_SIZE / 2) - shift;
+      faunaLayer.addChild(sprite);
+    }
+  }
+
+  if (overlays?.battles) {
+    for (const battle of Object.values(world.battles ?? {})) {
+      const pulse = Sprite.from(resolveAtlasAsset("overlay-tint"));
+      pulse.x = (battle.x * TILE_SIZE) + 2;
+      pulse.y = (battle.y * TILE_SIZE) + 2;
+      pulse.width = TILE_SIZE - 4;
+      pulse.height = TILE_SIZE - 4;
+      pulse.tint = 0xff715b;
+      pulse.alpha = 0.35;
+      runtime.layers.fxLayer.addChild(pulse);
+    }
   }
 
   maybeFitWorld(runtime, world, false);
 }
 
+function generateProceduralTextures(runtime) {
+  const { Graphics } = runtime.pixi;
+  const { app } = runtime;
+  const cache = {};
+
+  function makeTexture(id, drawFn) {
+    const g = new Graphics();
+    drawFn(g);
+    const texture = app.renderer.generateTexture(g);
+    cache[id] = texture;
+    g.destroy();
+  }
+
+  // Clean, perfectly readable pixel trees
+  makeTexture("tree-cluster", (g) => {
+    if (g.beginFill) {
+      g.beginFill(0x4a2e1b); g.drawRect(6, 11, 4, 5); // Trunk
+      g.beginFill(0x2d5c1e); g.drawRect(2, 2, 12, 10); // Leaves shadow
+      g.beginFill(0x3e7a29); g.drawRect(3, 3, 10, 8); // Leaves mid
+      g.beginFill(0x56a13d); g.drawRect(5, 4, 4, 4);  // Leaves bright
+      g.endFill();
+    } else {
+      g.rect(6, 11, 4, 5).fill({ color: 0x4a2e1b });
+      g.rect(2, 2, 12, 10).fill({ color: 0x2d5c1e });
+      g.rect(3, 3, 10, 8).fill({ color: 0x3e7a29 });
+      g.rect(5, 4, 4, 4).fill({ color: 0x56a13d });
+    }
+  });
+
+  makeTexture("terrain-water-deep", (g) => {
+    fillRect(g, 0, 0, 16, 16, 0xffffff);
+    fillRect(g, 3, 4, 3, 1, 0xd8f1ff);
+    fillRect(g, 9, 10, 3, 1, 0xc0ebff);
+  });
+
+  makeTexture("terrain-water", (g) => {
+    fillRect(g, 0, 0, 16, 16, 0xffffff);
+    fillRect(g, 2, 5, 4, 1, 0xe6fbff);
+    fillRect(g, 9, 10, 4, 1, 0xd9f7ff);
+  });
+
+  makeTexture("terrain-water-shallow", (g) => {
+    fillRect(g, 0, 0, 16, 16, 0xffffff);
+    fillRect(g, 3, 3, 4, 2, 0xf7ffff);
+    fillRect(g, 9, 10, 4, 1, 0xd5fbff);
+  });
+
+  makeTexture("terrain-grass", (g) => {
+    fillRect(g, 0, 0, 16, 16, 0xffffff);
+    fillRect(g, 3, 4, 2, 2, 0xe0ffbe);
+    fillRect(g, 10, 9, 2, 2, 0xc0ec8f);
+  });
+
+  makeTexture("terrain-meadow", (g) => {
+    fillRect(g, 0, 0, 16, 16, 0xffffff);
+    fillRect(g, 3, 4, 2, 2, 0xfef3a3);
+    fillRect(g, 10, 10, 2, 2, 0xd7f7ae);
+  });
+
+  makeTexture("terrain-forest-floor", (g) => {
+    fillRect(g, 0, 0, 16, 16, 0xffffff);
+    fillRect(g, 4, 4, 3, 2, 0xefffc6);
+    fillRect(g, 9, 10, 3, 2, 0xc2e28d);
+  });
+
+  makeTexture("terrain-sand", (g) => {
+    fillRect(g, 0, 0, 16, 16, 0xffffff);
+    fillRect(g, 4, 5, 4, 1, 0xfff3cf);
+    fillRect(g, 8, 10, 4, 1, 0xedcf8b);
+  });
+
+  makeTexture("terrain-swamp", (g) => {
+    fillRect(g, 0, 0, 16, 16, 0xffffff);
+    fillRect(g, 4, 4, 4, 2, 0xb7cf9a);
+    fillRect(g, 8, 10, 4, 2, 0x7da26a);
+  });
+
+  makeTexture("terrain-snow", (g) => {
+    fillRect(g, 0, 0, 16, 16, 0xffffff);
+    fillRect(g, 4, 5, 3, 2, 0xe2edf7);
+    fillRect(g, 9, 10, 3, 2, 0xd2e0ed);
+  });
+
+  makeTexture("terrain-crystal", (g) => {
+    fillRect(g, 0, 0, 16, 16, 0xffffff);
+    fillRect(g, 4, 4, 3, 4, 0xf0f3ff);
+    fillRect(g, 9, 9, 3, 4, 0xc7d8ff);
+  });
+
+  makeTexture("terrain-volcanic", (g) => {
+    fillRect(g, 0, 0, 16, 16, 0xffffff);
+    fillRect(g, 4, 4, 4, 2, 0x2a2a2f);
+    fillRect(g, 8, 10, 4, 2, 0xff9b63);
+  });
+
+  makeTexture("terrain-highland", (g) => {
+    fillRect(g, 0, 0, 16, 16, 0xffffff);
+    fillRect(g, 4, 5, 4, 2, 0xd4d6d8);
+    fillRect(g, 8, 10, 4, 2, 0xa2a7ab);
+  });
+
+  // Sharp, simple boxy mountains
+  makeTexture("mountain", (g) => {
+    if (g.beginFill) {
+      g.beginFill(0x5c5d60); g.drawRect(2, 6, 12, 10); // Base shadow
+      g.beginFill(0x7a7b7e); g.drawRect(3, 3, 10, 13); // Mid
+      g.beginFill(0x9ca3af); g.drawRect(5, 1, 6, 15); // Peak edge
+      g.beginFill(0xd1d5db); g.drawRect(6, 1, 4, 5); // Snow cap
+      g.endFill();
+    } else {
+      g.rect(2, 6, 12, 10).fill({ color: 0x5c5d60 });
+      g.rect(3, 3, 10, 13).fill({ color: 0x7a7b7e });
+      g.rect(5, 1, 6, 15).fill({ color: 0x9ca3af });
+      g.rect(6, 1, 4, 5).fill({ color: 0xd1d5db });
+    }
+  });
+
+  // Very clean, distinct house geometry
+  makeTexture("house-base", (g) => {
+    if (g.beginFill) {
+      g.beginFill(0xe0e6ed); g.drawRect(3, 6, 10, 8); // Wall
+      g.beginFill(0x9ca3af); g.drawRect(3, 13, 10, 1); // Wall shadow
+      g.beginFill(0x5c3a21); g.drawRect(6, 9, 4, 5); // Door
+      g.endFill();
+    } else {
+      g.rect(3, 6, 10, 8).fill({ color: 0xe0e6ed });
+      g.rect(3, 13, 10, 1).fill({ color: 0x9ca3af });
+      g.rect(6, 9, 4, 5).fill({ color: 0x5c3a21 });
+    }
+  });
+
+  // Red/brown roofs
+  makeTexture("house-roof", (g) => {
+    if (g.beginFill) {
+      g.beginFill(0xffffff); g.drawRect(1, 5, 14, 2); 
+      g.drawRect(2, 3, 12, 2);
+      g.drawRect(4, 1, 8, 2);
+      g.endFill();
+    } else {
+      g.rect(1, 5, 14, 2).fill({ color: 0xffffff });
+      g.rect(2, 3, 12, 2).fill({ color: 0xffffff });
+      g.rect(4, 1, 8, 2).fill({ color: 0xffffff });
+    }
+  });
+
+  // Smooth farm patches instead of crazy stripes
+  makeTexture("farm", (g) => {
+    if (g.beginFill) {
+      g.beginFill(0x4e3e26); g.drawRect(1, 1, 14, 14); // Dirt base
+      g.beginFill(0xfacc15); g.drawRect(3, 3, 10, 10); // Wheat square
+      g.beginFill(0xd97706); g.drawRect(5, 5, 6, 6); // Wheat center
+      g.endFill();
+    } else {
+      g.rect(1, 1, 14, 14).fill({ color: 0x4e3e26 });
+      g.rect(3, 3, 10, 10).fill({ color: 0xfacc15 });
+      g.rect(5, 5, 6, 6).fill({ color: 0xd97706 });
+    }
+  });
+
+  // Basic compact humans
+  makeTexture("agent", (g) => {
+    if (g.beginFill) {
+      g.beginFill(0x1f2937); g.drawRect(4, 10, 8, 4); // Legs
+      g.beginFill(0xffffff); g.drawRect(3, 4, 10, 6); // Body (tinted)
+      g.beginFill(0xffdcb1); g.drawRect(4, 0, 8, 4); // Head
+      g.endFill();
+    } else {
+      g.rect(4, 10, 8, 4).fill({ color: 0x1f2937 });
+      g.rect(3, 4, 10, 6).fill({ color: 0xffffff });
+      g.rect(4, 0, 8, 4).fill({ color: 0xffdcb1 });
+    }
+  });
+
+  makeTexture("human", (g) => {
+    if (g.beginFill) {
+      g.beginFill(0xffdcb1); g.drawRect(5, 3, 6, 4); // Head
+      g.beginFill(0xffffff); g.drawRect(4, 7, 8, 5); // Body
+      g.endFill();
+    } else {
+      g.rect(5, 3, 6, 4).fill({ color: 0xffdcb1 });
+      g.rect(4, 7, 8, 5).fill({ color: 0xffffff });
+    }
+  });
+
+  makeTexture("swarm-dot", (g) => {
+    if (g.beginFill) {
+      g.beginFill(0xffffff); g.drawRect(0, 0, 4, 4);
+      g.endFill();
+    } else {
+      g.rect(0, 0, 4, 4).fill({ color: 0xffffff });
+    }
+  });
+
+  return cache;
+}
+
+function fillRect(graphics, x, y, w, h, color) {
+  if (graphics.beginFill) {
+    graphics.beginFill(color);
+    graphics.drawRect(x, y, w, h);
+    graphics.endFill();
+    return;
+  }
+  graphics.rect(x, y, w, h).fill({ color });
+}
 
 function addFog(runtime) {
   const { Sprite, BlurFilter } = runtime.pixi;
@@ -619,6 +912,25 @@ function pointerToTile(runtime, event) {
 }
 
 
+function pointerToHuman(runtime, event) {
+  if (!runtime?.humanHitTargets?.length) {
+    return null;
+  }
+  const bounds = runtime.app.canvas.getBoundingClientRect();
+  const point = runtime.viewport.toWorld(event.clientX - bounds.left, event.clientY - bounds.top);
+  let nearest = null;
+  let nearestDistance = Number.POSITIVE_INFINITY;
+  for (const candidate of runtime.humanHitTargets) {
+    const distance = Math.hypot(candidate.worldX - point.x, candidate.worldY - point.y);
+    if (distance <= candidate.radius && distance < nearestDistance) {
+      nearest = candidate;
+      nearestDistance = distance;
+    }
+  }
+  return nearest;
+}
+
+
 function syncFocusSprites(runtime, selectedTile, hoveredTile) {
   if (!runtime) {
     return;
@@ -665,66 +977,24 @@ function easeOutCubic(value) {
 }
 
 
-function buildSwarmMarker(Container, Sprite, tint, slot) {
-  const container = new Container();
-
-  const shadow = Sprite.from(resolveAtlasAsset("overlay-tint"));
-  shadow.width = 12;
-  shadow.height = 5;
-  shadow.x = -6;
-  shadow.y = 3;
-  shadow.tint = 0x000000;
-  shadow.alpha = 0.28;
-  container.addChild(shadow);
-
-  const formation = swarmFormation(slot);
-  for (const unit of formation) {
-    const square = Sprite.from(resolveAtlasAsset("overlay-tint"));
-    square.width = unit.size;
-    square.height = unit.size;
-    square.x = unit.x;
-    square.y = unit.y;
-    square.tint = tint;
-    square.alpha = unit.alpha;
-    container.addChild(square);
-  }
-
-  return container;
+function buildHumanMarker(runtime, Sprite, tint) {
+  const sprite = new Sprite(runtime.proceduralTextures["swarm-dot"]);
+  sprite.anchor.set(0.5);
+  sprite.width = 4;
+  sprite.height = 4;
+  sprite.tint = tint;
+  sprite.alpha = 0.98;
+  return sprite;
 }
 
-
-function swarmFormation(slot) {
-  const variant = slot % 4;
-  if (variant === 1) {
-    return [
-      { x: -5, y: -3, size: 4, alpha: 0.88 },
-      { x: -1, y: -4, size: 4, alpha: 0.98 },
-      { x: 4, y: -2, size: 4, alpha: 0.84 },
-      { x: -2, y: 2, size: 3, alpha: 0.78 }
-    ];
-  }
-  if (variant === 2) {
-    return [
-      { x: -4, y: -2, size: 4, alpha: 0.86 },
-      { x: 0, y: -4, size: 5, alpha: 0.98 },
-      { x: 4, y: -1, size: 4, alpha: 0.82 },
-      { x: 1, y: 2, size: 3, alpha: 0.72 }
-    ];
-  }
-  if (variant === 3) {
-    return [
-      { x: -5, y: -1, size: 4, alpha: 0.9 },
-      { x: -1, y: -3, size: 5, alpha: 0.98 },
-      { x: 3, y: -4, size: 4, alpha: 0.84 },
-      { x: 2, y: 1, size: 3, alpha: 0.74 }
-    ];
-  }
-  return [
-    { x: -4, y: -3, size: 4, alpha: 0.86 },
-    { x: 0, y: -3, size: 5, alpha: 0.98 },
-    { x: 4, y: -1, size: 4, alpha: 0.82 },
-    { x: -1, y: 2, size: 3, alpha: 0.74 }
-  ];
+function terrainShadowTint(tile) {
+  if (tile.feature === "mountain" || tile.biome === "mountain" || tile.biome === "hills") return 0x4d5155;
+  if (tile.biome === "coast" || tile.biome === "sand" || tile.biome === "desert" || tile.biome === "savanna") return 0xb38a4e;
+  if (tile.biome === "snow" || tile.biome === "tundra") return 0xc7d3de;
+  if (tile.biome === "swamp") return 0x43614a;
+  if (tile.biome === "crystal" || tile.biome === "arcane") return 0x6f89b7;
+  if (tile.biome === "volcanic" || tile.biome === "corrupted") return 0x4b302b;
+  return 0x5c7a3a;
 }
 
 
@@ -738,4 +1008,25 @@ function swarmSlotOffset(slot) {
     { x: 0, y: -4 }
   ];
   return offsets[slot % offsets.length];
+}
+
+
+function buildAnimalMarker(runtime, Sprite, tint) {
+  const sprite = new Sprite(runtime.proceduralTextures["agent"]);
+  sprite.anchor.set(0.5);
+  sprite.width = 8;
+  sprite.height = 8;
+  sprite.tint = tint;
+  sprite.alpha = 0.92;
+  return sprite;
+}
+
+
+function animalTint(species) {
+  if (species === "wolves") return 0x98a2b3;
+  if (species === "bears") return 0x8b6a52;
+  if (species === "dragons") return 0xd86a5f;
+  if (species === "chickens") return 0xf5d56b;
+  if (species === "cows") return 0xcaa28f;
+  return 0xf5f2ea;
 }

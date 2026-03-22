@@ -296,6 +296,11 @@ class TileState:
     road_mask: int = 0
     decal: str | None = None
     elevation_band: str = "lowland"
+    fertility: int = 0
+    resource_tags: list[str] = field(default_factory=list)
+    danger_tags: list[str] = field(default_factory=list)
+    race_affinity: dict[str, int] = field(default_factory=dict)
+    city_score: int = 0
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "TileState":
@@ -317,6 +322,11 @@ class TileState:
             road_mask=require_int("road_mask", data.get("road_mask", 0), 0, 15, clamp=True),
             decal=data.get("decal"),
             elevation_band=str(data.get("elevation_band", "lowland")),
+            fertility=require_int("fertility", data.get("fertility", 0), 0, 100, clamp=True),
+            resource_tags=[str(item) for item in data.get("resource_tags", [])],
+            danger_tags=[str(item) for item in data.get("danger_tags", [])],
+            race_affinity={str(key): require_int(f"race_affinity[{key}]", value, 0, 100, clamp=True) for key, value in data.get("race_affinity", {}).items()},
+            city_score=require_int("city_score", data.get("city_score", 0), 0, 100, clamp=True),
         )
 
     @property
@@ -372,6 +382,11 @@ class TileState:
             "road_mask": self.road_mask,
             "decal": self.decal,
             "elevation_band": self.elevation_band,
+            "fertility": self.fertility,
+            "resource_tags": list(self.resource_tags),
+            "danger_tags": list(self.danger_tags),
+            "race_affinity": dict(self.race_affinity),
+            "city_score": self.city_score,
         }
 
 
@@ -380,7 +395,11 @@ class FactionState:
     id: str
     name: str
     banner_color: str | None = None
+    race_kind: str = "human"
+    spawn_x: int | None = None
+    spawn_y: int | None = None
     leader_id: str | None = None
+    capital_settlement_id: str | None = None
     alliances: set[str] = field(default_factory=set)
     wars: set[str] = field(default_factory=set)
 
@@ -390,7 +409,11 @@ class FactionState:
             id=data["id"],
             name=data.get("name", data["id"].title()),
             banner_color=data.get("banner_color", data.get("color")),
+            race_kind=str(data.get("race_kind", "human")),
+            spawn_x=None if data.get("spawn_x") is None else require_int("spawn_x", data.get("spawn_x")),
+            spawn_y=None if data.get("spawn_y") is None else require_int("spawn_y", data.get("spawn_y")),
             leader_id=data.get("leader_id"),
+            capital_settlement_id=data.get("capital_settlement_id"),
             alliances=set(data.get("alliances", [])),
             wars=set(data.get("wars", [])),
         )
@@ -400,7 +423,11 @@ class FactionState:
             "id": self.id,
             "name": self.name,
             "banner_color": self.banner_color,
+            "race_kind": self.race_kind,
+            "spawn_x": self.spawn_x,
+            "spawn_y": self.spawn_y,
             "leader_id": self.leader_id,
+            "capital_settlement_id": self.capital_settlement_id,
             "alliances": sorted(self.alliances),
             "wars": sorted(self.wars),
         }
@@ -433,6 +460,11 @@ class AgentState:
     emotions: Emotions
     needs: Needs
     inventory: Inventory = field(default_factory=Inventory)
+    entity_kind: str = "human"
+    race_kind: str = "human"
+    kingdom_id: str | None = None
+    role: str = "citizen"
+    home_city_id: str | None = None
     health: int = STATE_MAX
     alive: bool = True
     last_reasoned_tick: int = -999
@@ -449,6 +481,11 @@ class AgentState:
             faction_id=data["faction_id"],
             x=require_int("x", data["x"]),
             y=require_int("y", data["y"]),
+            entity_kind=str(data.get("entity_kind", "human")),
+            race_kind=str(data.get("race_kind", "human")),
+            kingdom_id=data.get("kingdom_id", data.get("faction_id")),
+            role=str(data.get("role", "citizen")),
+            home_city_id=data.get("home_city_id"),
             personality=BigFivePersonality.from_dict(data["personality"]),
             emotions=Emotions.from_dict(data["emotions"]),
             needs=Needs.from_dict(data["needs"]),
@@ -472,6 +509,11 @@ class AgentState:
             "faction_id": self.faction_id,
             "x": self.x,
             "y": self.y,
+            "entity_kind": self.entity_kind,
+            "race_kind": self.race_kind,
+            "kingdom_id": self.kingdom_id,
+            "role": self.role,
+            "home_city_id": self.home_city_id,
             "personality": self.personality.to_dict(),
             "emotions": self.emotions.to_dict(),
             "needs": self.needs.to_dict(),
@@ -483,6 +525,215 @@ class AgentState:
             "last_perception_signature": self.last_perception_signature,
             "last_intent": self.last_intent.to_dict() if self.last_intent else None,
             "last_goal": self.last_goal,
+        }
+
+
+@dataclass(slots=True)
+class AnimalUnitState:
+    id: str
+    species: str
+    name: str
+    kind: str
+    x: int
+    y: int
+    health: int = STATE_MAX
+    hunger: int = 4
+    energy: int = 6
+    alive: bool = True
+    target_kind: str | None = None
+    target_id: str | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "AnimalUnitState":
+        return cls(
+            id=str(data["id"]),
+            species=str(data.get("species", "sheep")),
+            name=str(data.get("name", data.get("species", "Animal").title())),
+            kind=str(data.get("kind", "grazer")),
+            x=require_int("x", data["x"]),
+            y=require_int("y", data["y"]),
+            health=require_int("health", data.get("health", STATE_MAX), 0, STATE_MAX, clamp=True),
+            hunger=require_int("hunger", data.get("hunger", 4), 0, STATE_MAX, clamp=True),
+            energy=require_int("energy", data.get("energy", 6), 0, STATE_MAX, clamp=True),
+            alive=bool(data.get("alive", True)),
+            target_kind=data.get("target_kind"),
+            target_id=data.get("target_id"),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "species": self.species,
+            "name": self.name,
+            "kind": self.kind,
+            "x": self.x,
+            "y": self.y,
+            "health": self.health,
+            "hunger": self.hunger,
+            "energy": self.energy,
+            "alive": self.alive,
+            "target_kind": self.target_kind,
+            "target_id": self.target_id,
+        }
+
+
+@dataclass(slots=True)
+class CityState:
+    id: str
+    name: str
+    kingdom_id: str
+    race_kind: str
+    x: int
+    y: int
+    population: int
+    level: int = 1
+    food_stores: int = 0
+    footprint: list[dict[str, Any]] = field(default_factory=list)
+    district_kinds: list[str] = field(default_factory=list)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "CityState":
+        return cls(
+            id=str(data["id"]),
+            name=str(data.get("name", data["id"])),
+            kingdom_id=str(data.get("kingdom_id", data.get("owner_faction"))),
+            race_kind=str(data.get("race_kind", "human")),
+            x=require_int("x", data["x"]),
+            y=require_int("y", data["y"]),
+            population=require_int("population", data.get("population", 0), 0),
+            level=require_int("level", data.get("level", 1), 1, 10, clamp=True),
+            food_stores=require_int("food_stores", data.get("food_stores", 0), 0),
+            footprint=[dict(item) for item in data.get("footprint", [])],
+            district_kinds=[str(item) for item in data.get("district_kinds", [])],
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "kingdom_id": self.kingdom_id,
+            "race_kind": self.race_kind,
+            "x": self.x,
+            "y": self.y,
+            "population": self.population,
+            "level": self.level,
+            "food_stores": self.food_stores,
+            "footprint": [dict(item) for item in self.footprint],
+            "district_kinds": list(self.district_kinds),
+        }
+
+
+@dataclass(slots=True)
+class KingdomState:
+    id: str
+    name: str
+    race_kind: str
+    color: str | None = None
+    leader_id: str | None = None
+    capital_city_id: str | None = None
+    population: int = 0
+    city_ids: list[str] = field(default_factory=list)
+    controller_provider: str | None = None
+    controller_model: str | None = None
+    auto_seeded: bool = False
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "KingdomState":
+        return cls(
+            id=str(data["id"]),
+            name=str(data.get("name", data["id"])),
+            race_kind=str(data.get("race_kind", "human")),
+            color=data.get("color"),
+            leader_id=data.get("leader_id"),
+            capital_city_id=data.get("capital_city_id"),
+            population=require_int("population", data.get("population", 0), 0),
+            city_ids=[str(item) for item in data.get("city_ids", [])],
+            controller_provider=data.get("controller_provider"),
+            controller_model=data.get("controller_model"),
+            auto_seeded=bool(data.get("auto_seeded", False)),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "race_kind": self.race_kind,
+            "color": self.color,
+            "leader_id": self.leader_id,
+            "capital_city_id": self.capital_city_id,
+            "population": self.population,
+            "city_ids": list(self.city_ids),
+            "controller_provider": self.controller_provider,
+            "controller_model": self.controller_model,
+            "auto_seeded": self.auto_seeded,
+        }
+
+
+@dataclass(slots=True)
+class StructureState:
+    id: str
+    kind: str
+    x: int
+    y: int
+    kingdom_id: str | None = None
+    city_id: str | None = None
+    integrity: int = 10
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "StructureState":
+        return cls(
+            id=str(data["id"]),
+            kind=str(data.get("kind", "structure")),
+            x=require_int("x", data["x"]),
+            y=require_int("y", data["y"]),
+            kingdom_id=data.get("kingdom_id"),
+            city_id=data.get("city_id"),
+            integrity=require_int("integrity", data.get("integrity", 10), 0, 10, clamp=True),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "kind": self.kind,
+            "x": self.x,
+            "y": self.y,
+            "kingdom_id": self.kingdom_id,
+            "city_id": self.city_id,
+            "integrity": self.integrity,
+        }
+
+
+@dataclass(slots=True)
+class BattleState:
+    id: str
+    x: int
+    y: int
+    attacker_kingdom_id: str
+    defender_kingdom_id: str
+    intensity: int
+    tick_started: int
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "BattleState":
+        return cls(
+            id=str(data["id"]),
+            x=require_int("x", data["x"]),
+            y=require_int("y", data["y"]),
+            attacker_kingdom_id=str(data["attacker_kingdom_id"]),
+            defender_kingdom_id=str(data["defender_kingdom_id"]),
+            intensity=require_int("intensity", data.get("intensity", 1), 1, 10, clamp=True),
+            tick_started=require_int("tick_started", data.get("tick_started", 0), 0),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "x": self.x,
+            "y": self.y,
+            "attacker_kingdom_id": self.attacker_kingdom_id,
+            "defender_kingdom_id": self.defender_kingdom_id,
+            "intensity": self.intensity,
+            "tick_started": self.tick_started,
         }
 
 
@@ -503,6 +754,9 @@ class SimulationConfig:
     river_count: int = 7
     settlement_density: int = 18
     landmark_density: int = 14
+    biome_density: int = 62
+    fauna_density: int = 54
+    kingdom_growth_intensity: int = 60
 
     def __post_init__(self) -> None:
         self.width = require_int("width", self.width, 1)
@@ -523,6 +777,11 @@ class SimulationConfig:
         self.landmark_density = require_int(
             "landmark_density", self.landmark_density, 0, 100, clamp=True
         )
+        self.biome_density = require_int("biome_density", self.biome_density, 0, 100, clamp=True)
+        self.fauna_density = require_int("fauna_density", self.fauna_density, 0, 100, clamp=True)
+        self.kingdom_growth_intensity = require_int(
+            "kingdom_growth_intensity", self.kingdom_growth_intensity, 0, 100, clamp=True
+        )
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "SimulationConfig":
@@ -542,6 +801,9 @@ class SimulationConfig:
             river_count=data.get("river_count", 7),
             settlement_density=data.get("settlement_density", 18),
             landmark_density=data.get("landmark_density", 14),
+            biome_density=data.get("biome_density", 62),
+            fauna_density=data.get("fauna_density", 54),
+            kingdom_growth_intensity=data.get("kingdom_growth_intensity", 60),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -561,6 +823,9 @@ class SimulationConfig:
             "river_count": self.river_count,
             "settlement_density": self.settlement_density,
             "landmark_density": self.landmark_density,
+            "biome_density": self.biome_density,
+            "fauna_density": self.fauna_density,
+            "kingdom_growth_intensity": self.kingdom_growth_intensity,
         }
 
 
@@ -579,6 +844,12 @@ class WorldState:
     roads: list[dict[str, Any]] = field(default_factory=list)
     territories: dict[str, dict[str, Any]] = field(default_factory=dict)
     communications: list[CommunicationMessage] = field(default_factory=list)
+    animals: dict[str, AnimalUnitState] = field(default_factory=dict)
+    cities: dict[str, CityState] = field(default_factory=dict)
+    kingdoms: dict[str, KingdomState] = field(default_factory=dict)
+    structures: dict[str, StructureState] = field(default_factory=dict)
+    battles: dict[str, BattleState] = field(default_factory=dict)
+    fauna_events: list[dict[str, Any]] = field(default_factory=list)
 
     def in_bounds(self, x: int, y: int) -> bool:
         return 0 <= x < self.width and 0 <= y < self.height
@@ -640,6 +911,12 @@ class WorldState:
                 faction_id: dict(payload) for faction_id, payload in sorted(self.territories.items())
             },
             "communications": [message.to_dict() for message in self.communications],
+            "animals": {animal_id: animal.to_dict() for animal_id, animal in sorted(self.animals.items())},
+            "cities": {city_id: city.to_dict() for city_id, city in sorted(self.cities.items())},
+            "kingdoms": {kingdom_id: kingdom.to_dict() for kingdom_id, kingdom in sorted(self.kingdoms.items())},
+            "structures": {structure_id: structure.to_dict() for structure_id, structure in sorted(self.structures.items())},
+            "battles": {battle_id: battle.to_dict() for battle_id, battle in sorted(self.battles.items())},
+            "fauna_events": [dict(item) for item in self.fauna_events],
         }
 
 

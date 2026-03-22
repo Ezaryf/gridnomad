@@ -37,6 +37,18 @@ class ProviderRoutingTests(unittest.TestCase):
         self.assertEqual(settings.for_faction("blue").provider, "anthropic")
         self.assertEqual(settings.for_faction("gold").provider, "gemini-api")
 
+    def test_civilization_settings_parses_runtime_faction_list(self) -> None:
+        settings = CivilizationSettings.from_dict(
+            {
+                "factions": [
+                    {"id": "human-kingdom-01", "controller": {"provider": "gemini-cli", "model": "gemini-2.5-pro"}},
+                    {"id": "manual-keep", "controller": {"provider": "openai", "model": "gpt-5-mini", "apiKey": "sk-openai"}},
+                ]
+            }
+        )
+        self.assertEqual(settings.for_faction("human-kingdom-01").provider, "gemini-cli")
+        self.assertEqual(settings.for_faction("manual-keep").provider, "openai")
+
     def test_routing_adapter_builds_direct_provider_adapters(self) -> None:
         adapter = RoutingLLMAdapter(CivilizationSettings())
         self.assertIsInstance(adapter._adapter_for(CivilizationProviderConfig(provider="openai")), OpenAIAPIAdapter)

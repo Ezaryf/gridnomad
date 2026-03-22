@@ -67,6 +67,9 @@ class GeneratorSettings:
     river_count: int
     settlement_density: int
     landmark_density: int
+    biome_density: int
+    fauna_density: int
+    kingdom_growth_intensity: int
 
     @classmethod
     def from_sources(
@@ -93,6 +96,9 @@ class GeneratorSettings:
             river_count=int(generator.get("river_count", config.river_count)),
             settlement_density=int(generator.get("settlement_density", config.settlement_density)),
             landmark_density=int(generator.get("landmark_density", config.landmark_density)),
+            biome_density=int(generator.get("biome_density", config.biome_density)),
+            fauna_density=int(generator.get("fauna_density", config.fauna_density)),
+            kingdom_growth_intensity=int(generator.get("kingdom_growth_intensity", config.kingdom_growth_intensity)),
         )
 
 
@@ -173,23 +179,35 @@ def generate_seeded_world(
                 else:
                     tile.biome = biome_palette["ocean"]
                 tile.moisture = 100
+                tile.fertility = 0
+                tile.resource_tags = ["water"]
+                tile.danger_tags = ["flood"]
+                tile.race_affinity = {"human": 20, "orc": 10, "elf": 15, "dwarf": 5}
+                tile.city_score = 0
                 continue
 
             moisture_noise = _fractal_noise(settings.seed + 401, x, y, (52, 24, 12, 6), (1.0, 0.55, 0.24, 0.12))
+            temperature_noise = _fractal_noise(settings.seed + 487, x, y, (64, 22, 10), (1.0, 0.42, 0.18))
+            arcane_noise = _fractal_noise(settings.seed + 541, x, y, (44, 18, 8), (1.0, 0.48, 0.2))
             water_bonus = max(0.0, 1.0 - (water_distance[y][x] / 14.0))
             moisture = int(max(0.0, min(1.0, (moisture_noise * 0.62) + (water_bonus * 0.38))) * 100)
             tile.moisture = moisture
+            fertility = int(max(0.0, min(1.0, ((moisture / 100.0) * 0.7) + (water_bonus * 0.3))) * 100)
+            tile.fertility = fertility
+
+            biome_bias = (settings.biome_density - 50) / 100.0
 
             if tile.elevation >= max(74, sea_level + 22) and ridge_map[y][x] >= 0.48:
                 tile.feature = "mountain"
-                tile.biome = biome_palette["alpine"]
+                tile.biome = "crystal" if arcane_noise > 0.81 else ("volcanic" if arcane_noise < 0.14 else biome_palette["alpine"])
                 if _hash01(settings.seed + 923, x, y) > 0.35:
                     tile.resource = "stone"
                 if _hash01(settings.seed + 517, x, y) > 0.44:
                     props.append(_prop("mountain", x, y, variant=_variant(settings.seed + 5, x, y, 4)))
-                continue
-
-            if moisture >= 68 and tile.elevation < 78 and _hash01(settings.seed + 617, x, y) > 0.28:
+            elif moisture >= (74 - biome_bias * 12) and temperature_noise >= 0.7 and tile.elevation < 66:
+                tile.feature = "forest"
+                tile.biome = "jungle"
+            elif moisture >= (62 - biome_bias * 10) and tile.elevation < 78 and _hash01(settings.seed + 617, x, y) > 0.28:
                 tile.feature = "forest"
                 tile.biome = biome_palette["forest"]
                 if _hash01(settings.seed + 771, x, y) > 0.42:
@@ -204,6 +222,15 @@ def generate_seeded_world(
                             density=1 + _variant(settings.seed + 23, x, y, 3),
                         )
                     )
+            elif moisture <= 18 and temperature_noise >= 0.58:
+                tile.biome = "desert"
+                tile.resource = tile.resource or "stone"
+            elif moisture <= 32 and temperature_noise >= 0.46:
+                tile.biome = "savanna"
+            elif moisture >= 72 and tile.elevation < 48:
+                tile.biome = "swamp"
+            elif temperature_noise <= 0.22:
+                tile.biome = "snow" if tile.elevation >= 64 else "tundra"
             elif moisture <= 28:
                 tile.biome = biome_palette["scrub"]
                 if _hash01(settings.seed + 809, x, y) > 0.78:
@@ -212,6 +239,8 @@ def generate_seeded_world(
                 tile.biome = biome_palette["coast"]
                 if _hash01(settings.seed + 877, x, y) > 0.83:
                     props.append(_prop("reed-bank", x, y, variant=_variant(settings.seed + 47, x, y, 3)))
+            elif fertility >= 72:
+                tile.biome = "fertile-plains"
             else:
                 tile.biome = biome_palette["grassland"] if moisture < 58 else biome_palette["meadow"]
                 if _hash01(settings.seed + 991, x, y) > 0.9:
@@ -225,6 +254,10 @@ def generate_seeded_world(
             )
             if tile.resource is None and tile.farmable and _hash01(settings.seed + 1013, x, y) > 0.93:
                 tile.resource = "food"
+            tile.resource_tags = _resource_tags_for_tile(tile)
+            tile.danger_tags = _danger_tags_for_tile(tile)
+            tile.race_affinity = _race_affinity_for_tile(tile)
+            tile.city_score = _city_score_for_tile(tile, water_distance[y][x])
 
     region_seeds = _choose_region_seeds(tiles, settings, rng)
     for index, (sx, sy) in enumerate(region_seeds):
@@ -453,6 +486,27 @@ def _place_settlements(
     capital_spacing = max(12, min(width, height) // 5)
     faction_ids = list(sorted(factions))
     for faction_id in faction_ids:
+        faction = factions[faction_id]
+        preferred = _manual_capital_candidate(tiles, faction)
+        if preferred is not None:
+            x, y = preferred
+            chosen.append((x, y))
+            settlement_id = f"{faction_id}-capital"
+            settlements.append(
+                {
+                    "id": settlement_id,
+                    "name": _settlement_name(settings.seed, len(settlements)),
+                    "kind": "capital",
+                    "x": x,
+                    "y": y,
+                    "owner_faction": faction_id,
+                    "region_id": tiles[y][x].region_id,
+                }
+            )
+            tiles[y][x].feature = "settlement"
+            tiles[y][x].settlement_id = settlement_id
+            tiles[y][x].owner_faction = faction_id
+            continue
         for score, x, y in candidates:
             if any(abs(x - ox) + abs(y - oy) < capital_spacing for ox, oy in chosen):
                 continue
@@ -676,6 +730,89 @@ def _elevation_band(elevation: int, biome: str) -> str:
     if biome in {"coast", "lagoon", "shoreline"}:
         return "coast"
     return "lowland"
+
+
+def _resource_tags_for_tile(tile: TileState) -> list[str]:
+    tags: list[str] = []
+    if tile.resource:
+        tags.append(tile.resource)
+    if tile.farmable or tile.biome in {"fertile-plains", "grassland", "meadow"}:
+        tags.append("food")
+    if tile.feature == "forest" or tile.biome in {"forest", "jungle"}:
+        tags.append("wood")
+    if tile.feature == "mountain" or tile.biome in {"alpine", "crystal", "volcanic"}:
+        tags.append("stone")
+    if tile.biome == "crystal":
+        tags.append("crystal")
+    return sorted(dict.fromkeys(tags))
+
+
+def _danger_tags_for_tile(tile: TileState) -> list[str]:
+    tags: list[str] = []
+    if tile.biome in {"volcanic", "swamp"}:
+        tags.append("hazard")
+    if tile.biome in {"crystal", "arcane"}:
+        tags.append("arcane")
+    if tile.feature == "mountain":
+        tags.append("rough-terrain")
+    if tile.terrain == TileType.WATER and tile.feature != "river":
+        tags.append("flood")
+    return tags
+
+
+def _race_affinity_for_tile(tile: TileState) -> dict[str, int]:
+    affinity = {"human": 55, "orc": 45, "elf": 45, "dwarf": 45}
+    if tile.biome in {"grassland", "fertile-plains", "meadow", "coast"}:
+        affinity["human"] += 25
+    if tile.biome in {"forest", "jungle", "grove", "meadow"}:
+        affinity["elf"] += 30
+    if tile.biome in {"alpine", "crystal", "mountain"} or tile.feature == "mountain":
+        affinity["dwarf"] += 34
+    if tile.biome in {"scrub", "desert", "savanna", "volcanic"}:
+        affinity["orc"] += 30
+    if "hazard" in tile.danger_tags:
+        affinity["human"] -= 12
+        affinity["elf"] -= 8
+    return {race: max(0, min(100, value)) for race, value in affinity.items()}
+
+
+def _city_score_for_tile(tile: TileState, water_distance: int) -> int:
+    base = 18
+    base += tile.fertility // 3
+    base += max(0, 18 - min(water_distance, 18))
+    if tile.biome in {"coast", "lagoon", "shoreline"}:
+        base += 12
+    if tile.feature == "mountain":
+        base -= 14
+    if "hazard" in tile.danger_tags:
+        base -= 12
+    if tile.biome == "fertile-plains":
+        base += 10
+    return max(0, min(100, base))
+
+
+def _manual_capital_candidate(
+    tiles: list[list[TileState]],
+    faction: FactionState,
+) -> tuple[int, int] | None:
+    if faction.spawn_x is None or faction.spawn_y is None:
+        return None
+    width = len(tiles[0])
+    height = len(tiles)
+    x = max(0, min(width - 1, faction.spawn_x))
+    y = max(0, min(height - 1, faction.spawn_y))
+    for radius in range(0, 5):
+        for dx in range(-radius, radius + 1):
+            for dy in range(-radius, radius + 1):
+                if abs(dx) + abs(dy) != radius:
+                    continue
+                nx = x + dx
+                ny = y + dy
+                if 0 <= nx < width and 0 <= ny < height:
+                    tile = tiles[ny][nx]
+                    if tile.passable and tile.feature != "mountain":
+                        return nx, ny
+    return None
 
 
 def _choose_tile_decal(tile: TileState, seed: int, x: int, y: int) -> str | None:

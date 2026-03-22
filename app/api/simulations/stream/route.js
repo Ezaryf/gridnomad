@@ -12,6 +12,7 @@ import {
   readScenario,
   readSettings,
   worldArgsFromSettings,
+  writeRuntimeControllers,
   writeRuntimeScenario,
   writeSettings
 } from "@/lib/gridnomad-store";
@@ -29,6 +30,7 @@ export async function POST(request) {
   const baseScenario = await readScenario();
   const synthesizedScenario = synthesizeScenario(baseScenario, mergedSettings);
   const runtimeScenarioPath = await writeRuntimeScenario(synthesizedScenario);
+  const runtimeSettingsPath = await writeRuntimeControllers(mergedSettings);
   const runDir = path.join(ROOT, "runs", `web-stream-${new Date().toISOString().replace(/[:.]/g, "-")}`);
   await fs.mkdir(runDir, { recursive: true });
 
@@ -45,7 +47,7 @@ export async function POST(request) {
     "--out",
     runDir,
     "--settings",
-    SETTINGS_PATH,
+    runtimeSettingsPath,
     ...worldArgsFromSettings(mergedSettings.world)
   ];
 
@@ -84,7 +86,10 @@ export async function POST(request) {
           type: "error",
           message: error.message
         });
-        await fs.unlink(runtimeScenarioPath).catch(() => {});
+        await Promise.all([
+          fs.unlink(runtimeScenarioPath).catch(() => {}),
+          fs.unlink(runtimeSettingsPath).catch(() => {})
+        ]);
         controller.close();
       });
 
@@ -96,7 +101,10 @@ export async function POST(request) {
             code
           });
         }
-        await fs.unlink(runtimeScenarioPath).catch(() => {});
+        await Promise.all([
+          fs.unlink(runtimeScenarioPath).catch(() => {}),
+          fs.unlink(runtimeSettingsPath).catch(() => {})
+        ]);
         controller.close();
       });
     }
