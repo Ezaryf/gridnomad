@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 
 from gridnomad.core.models import AgentState
 
@@ -20,6 +21,10 @@ class AgentPromptView:
     personality: object
     emotions: object
     needs: object
+    persona_summary: str
+    social_style: str
+    resource_bias: str
+    starting_drive: str
     memory: AgentMemoryView
     x: int
     y: int
@@ -32,6 +37,10 @@ class AgentPromptView:
             personality=agent.personality,
             emotions=agent.emotions,
             needs=agent.needs,
+            persona_summary=agent.persona_summary,
+            social_style=agent.social_style,
+            resource_bias=agent.resource_bias,
+            starting_drive=agent.starting_drive,
             memory=AgentMemoryView(memories=memories),
             x=agent.x,
             y=agent.y,
@@ -55,6 +64,10 @@ You belong to the group {agent.group}. The AI controlling your group should beha
 - Extraversion: {agent.personality.extraversion}
 - Agreeableness: {agent.personality.agreeableness}
 - Neuroticism: {agent.personality.neuroticism}
+- Persona summary: {agent.persona_summary or "None provided"}
+- Social style: {agent.social_style or "None provided"}
+- Resource bias: {agent.resource_bias or "None provided"}
+- Starting drive: {agent.starting_drive or "None provided"}
 
 ## Your Current State:
 - Emotions (0-10): Joy={agent.emotions.joy}, Sadness={agent.emotions.sadness}, Fear={agent.emotions.fear}, Anger={agent.emotions.anger}, Disgust={agent.emotions.disgust}, Surprise={agent.emotions.surprise}
@@ -132,4 +145,63 @@ Important:
 - Do not invent kingdoms, races, cities, or fantasy systems. This is a group-of-humans simulator.
 
 Now respond with your JSON decision.
+""".strip()
+
+
+def build_group_batch_prompt(group_id: str, cultural_context: str, serialized_humans: list[dict[str, object]]) -> str:
+    return f"""
+You are the OpenCode controller for the GridNomad human group {group_id}.
+Your job is to choose the next immediate microstep for every living human in this group.
+
+Important rules:
+- Return exactly one decision for every human id provided below.
+- Do not skip anyone.
+- Decide only the next immediate step for each human.
+- Every action must be one of:
+  MOVE_NORTH, MOVE_SOUTH, MOVE_EAST, MOVE_WEST, REST, INTERACT, CONSUME, GATHER, BUILD, TRANSFER, COMMUNICATE
+- Use target_agent_id when a human is reacting to a specific nearby human.
+- Keep speech short and natural.
+- Preserve each human's individuality using their persona, personality, current needs, emotions, inventory, memories, and perception.
+- This is a group-of-humans simulator. Do not invent kingdoms, races, cities, or other systems.
+
+Group culture summary:
+{cultural_context}
+
+Humans to control:
+{json.dumps(serialized_humans, indent=2)}
+
+Return only valid JSON in this exact shape:
+{{
+  "decisions": [
+    {{
+      "human_id": "group-01-human-01",
+      "action": "MOVE_EAST",
+      "target_x": null,
+      "target_y": null,
+      "target_agent_id": null,
+      "reason": "Immediate local reason for the next step.",
+      "intent": "Short human-readable goal.",
+      "speech": "Optional short speech.",
+      "target_resource_kind": "food",
+      "interaction_mode": "support",
+      "desired_distance": 1,
+      "updated_emotions": {{
+        "Joy": 5,
+        "Sadness": 1,
+        "Fear": 2,
+        "Anger": 1,
+        "Disgust": 0,
+        "Surprise": 3
+      }},
+      "updated_needs": {{
+        "Survival": 4,
+        "Safety": 4,
+        "Belonging": 5,
+        "Esteem": 4,
+        "Self_Actualization": 5
+      }},
+      "thought": "One short inner thought."
+    }}
+  ]
+}}
 """.strip()

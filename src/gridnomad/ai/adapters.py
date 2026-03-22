@@ -240,3 +240,27 @@ def parse_decision_payload(response: DecisionPayload | str) -> DecisionPayload:
             description=decision.reason or "Novel action suggested by raw model response.",
         )
     return decision
+
+
+def parse_group_decision_payloads(response: str) -> dict[str, DecisionPayload]:
+    data = json.loads(response)
+    raw_decisions = data.get("decisions")
+    if not isinstance(raw_decisions, list):
+        raise ValueError("Group decision response must contain a decisions array.")
+    decisions: dict[str, DecisionPayload] = {}
+    for item in raw_decisions:
+        if not isinstance(item, dict):
+            raise ValueError("Each group decision must be an object.")
+        human_id = str(item.get("human_id", "")).strip()
+        if not human_id:
+            raise ValueError("Each group decision must include human_id.")
+        if human_id in decisions:
+            raise ValueError(f"Duplicate decision for {human_id}.")
+        decision = DecisionPayload.from_dict(item, clamp_states=True)
+        if decision.action not in MODEL_ACTIONS and decision.action_proposal is None:
+            decision.action_proposal = ActionProposal(
+                name=decision.action,
+                description=decision.reason or "Novel action suggested by raw model response.",
+            )
+        decisions[human_id] = decision
+    return decisions

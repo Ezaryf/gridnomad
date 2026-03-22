@@ -468,6 +468,10 @@ class AgentState:
     personality: BigFivePersonality
     emotions: Emotions
     needs: Needs
+    persona_summary: str = ""
+    social_style: str = ""
+    resource_bias: str = ""
+    starting_drive: str = ""
     inventory: Inventory = field(default_factory=Inventory)
     entity_kind: str = "human"
     race_kind: str = "human"
@@ -505,6 +509,10 @@ class AgentState:
             faction_id=data["faction_id"],
             x=require_int("x", data["x"]),
             y=require_int("y", data["y"]),
+            persona_summary=str(data.get("persona_summary", data.get("personaSummary", ""))),
+            social_style=str(data.get("social_style", data.get("socialStyle", ""))),
+            resource_bias=str(data.get("resource_bias", data.get("resourceBias", ""))),
+            starting_drive=str(data.get("starting_drive", data.get("startingDrive", ""))),
             entity_kind=str(data.get("entity_kind", "human")),
             race_kind=str(data.get("race_kind", "human")),
             kingdom_id=data.get("kingdom_id", data.get("faction_id")),
@@ -548,6 +556,10 @@ class AgentState:
             "faction_id": self.faction_id,
             "x": self.x,
             "y": self.y,
+            "persona_summary": self.persona_summary,
+            "social_style": self.social_style,
+            "resource_bias": self.resource_bias,
+            "starting_drive": self.starting_drive,
             "entity_kind": self.entity_kind,
             "race_kind": self.race_kind,
             "kingdom_id": self.kingdom_id,

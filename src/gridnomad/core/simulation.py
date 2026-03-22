@@ -198,6 +198,22 @@ class Simulation:
             return []
 
         inputs = [self._build_decision_input(agent) for agent in active_agents]
+        if hasattr(self.adapter, "decide_many"):
+            contexts = [context for _, _, context in inputs]
+            try:
+                raw_map = self.adapter.decide_many(contexts)
+            except ProviderDecisionError as exc:
+                raise SimulationAbortError(
+                    message=f"A group controller could not get a decision from {exc.provider}: {exc.message}",
+                    faction_id=exc.faction_id,
+                    provider=exc.provider,
+                    model=exc.model,
+                    reason="provider_failure",
+                ) from exc
+            return [
+                self._resolve_raw_decision(agent, perception, raw_map[agent.id])
+                for agent, perception, _ in inputs
+            ]
         max_workers = min(8, len(inputs))
         if max_workers <= 1:
             return [self._resolve_decision_input(item) for item in inputs]
@@ -235,6 +251,9 @@ class Simulation:
                 model=exc.model,
                 reason="provider_failure",
             ) from exc
+        return self._resolve_raw_decision(agent, perception, raw)
+
+    def _resolve_raw_decision(self, agent: AgentState, perception, raw) -> AgentDecisionFrame:
         try:
             decision = parse_decision_payload(raw)
         except (ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:

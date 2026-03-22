@@ -9,7 +9,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from gridnomad.ai.adapters import AgentContext, HeuristicLLMAdapter, LLMAdapter
+from gridnomad.ai.adapters import AgentContext, HeuristicLLMAdapter, LLMAdapter, parse_group_decision_payloads
+from gridnomad.ai.prompting import build_group_batch_prompt
 
 
 ANSI_PATTERN = re.compile(r"\x1b\[[0-9;]*m")
@@ -82,6 +83,8 @@ class CivilizationProviderConfig:
     use_vertex: bool = False
     opencode_provider: str | None = None
     cli_home: str | None = None
+    managed_home_id: str | None = None
+    execution_mode: str = "per_human"
     timeout_seconds: int = 120
     base_url: str | None = None
     available_models: list[str] = field(default_factory=list)
@@ -100,6 +103,8 @@ class CivilizationProviderConfig:
             use_vertex=bool(data.get("useVertex", data.get("use_vertex", False))),
             opencode_provider=data.get("opencodeProvider") or data.get("opencode_provider"),
             cli_home=data.get("cliHome") or data.get("cli_home"),
+            managed_home_id=data.get("managedHomeId") or data.get("managed_home_id"),
+            execution_mode=str(data.get("executionMode", data.get("execution_mode", "per_human"))),
             timeout_seconds=int(data.get("timeoutSeconds", data.get("timeout_seconds", 120))),
             base_url=data.get("baseUrl") or data.get("base_url"),
             available_models=[str(item) for item in data.get("availableModels", data.get("available_models", []))],
@@ -118,6 +123,8 @@ class CivilizationProviderConfig:
             "useVertex": self.use_vertex,
             "opencodeProvider": self.opencode_provider or "",
             "cliHome": self.cli_home or "",
+            "managedHomeId": self.managed_home_id or "",
+            "executionMode": self.execution_mode,
             "timeoutSeconds": self.timeout_seconds,
             "baseUrl": self.base_url or "",
             "availableModels": list(self.available_models),
@@ -306,13 +313,17 @@ class OpenCodeCLIAdapter:
         self.config = config
         self.project_dir = Path(project_dir or Path.cwd()).resolve()
 
-    def decide(self, agent_context: AgentContext) -> str:
+    def _command_base(self) -> list[str]:
         command = ["opencode", "run", "--dir", str(self.project_dir)]
         if self.config.opencode_provider:
             command.extend(["--provider", self.config.opencode_provider])
         if self.config.model:
             command.extend(["-m", self.config.model])
-        command.append(agent_context.prompt)
+        return command
+
+    def _run_prompt(self, prompt: str) -> str:
+        command = self._command_base()
+        command.append(prompt)
         completed = subprocess.run(
             command,
             cwd=self.project_dir,
@@ -329,6 +340,41 @@ class OpenCodeCLIAdapter:
         if completed.returncode != 0 and completed.stdout.strip() == "":
             raise RuntimeError(output)
         return _clean_cli_output(output)
+
+    def decide(self, agent_context: AgentContext) -> str:
+        return self._run_prompt(agent_context.prompt)
+
+    def decide_many(self, agent_contexts: list[AgentContext]) -> dict[str, object]:
+        if not agent_contexts:
+            return {}
+        serialized_humans = [
+            {
+                "human_id": context.agent.id,
+                "name": context.agent.name,
+                "group": context.agent.faction_id,
+                "position": {"x": context.agent.x, "y": context.agent.y},
+                "persona_summary": context.agent.persona_summary,
+                "social_style": context.agent.social_style,
+                "resource_bias": context.agent.resource_bias,
+                "starting_drive": context.agent.starting_drive,
+                "personality": context.agent.personality.to_dict(),
+                "emotions": context.agent.emotions.to_dict(),
+                "needs": context.agent.needs.to_dict(),
+                "inventory": context.agent.inventory.to_dict(),
+                "recent_events": list(context.recent_events),
+                "recent_memories": list(context.memories),
+                "recent_messages": dict(context.recent_messages),
+                "perception": context.perception.text,
+            }
+            for context in agent_contexts
+        ]
+        prompt = build_group_batch_prompt(
+            agent_contexts[0].agent.faction_id,
+            agent_contexts[0].cultural_context,
+            serialized_humans,
+        )
+        response = self._run_prompt(prompt)
+        return parse_group_decision_payloads(response)
 
 
 class RoutingLLMAdapter:
@@ -372,6 +418,67 @@ class RoutingLLMAdapter:
                 message=str(exc),
             ) from exc
 
+    def decide_many(self, agent_contexts: list[AgentContext]) -> dict[str, object]:
+        outputs: dict[str, object] = {}
+        grouped: dict[str, list[AgentContext]] = {}
+        for context in agent_contexts:
+            grouped.setdefault(context.agent.faction_id, []).append(context)
+
+        for faction_id, contexts in grouped.items():
+            config = self.settings.for_faction(faction_id)
+            if config.provider == "opencode" and config.execution_mode == "group_batch":
+                adapter = self._adapter_for(config)
+                try:
+                    decisions = adapter.decide_many(contexts)
+                except Exception as exc:
+                    with self._lock:
+                        self._runtime_messages.append(
+                            {
+                                "faction_id": faction_id,
+                                "provider": config.provider,
+                                "model": config.model or "",
+                                "message": str(exc),
+                            }
+                        )
+                    raise ProviderDecisionError(
+                        faction_id=faction_id,
+                        provider=config.provider,
+                        model=config.model or "",
+                        message=str(exc),
+                    ) from exc
+                expected_ids = {context.agent.id for context in contexts}
+                returned_ids = set(decisions.keys())
+                if returned_ids != expected_ids:
+                    missing = sorted(expected_ids - returned_ids)
+                    extras = sorted(returned_ids - expected_ids)
+                    detail_bits: list[str] = []
+                    if missing:
+                        detail_bits.append(f"missing {', '.join(missing)}")
+                    if extras:
+                        detail_bits.append(f"unexpected {', '.join(extras)}")
+                    detail = f"Batch OpenCode response did not cover the group exactly ({'; '.join(detail_bits)})."
+                    with self._lock:
+                        self._runtime_messages.append(
+                            {
+                                "faction_id": faction_id,
+                                "provider": config.provider,
+                                "model": config.model or "",
+                                "message": detail,
+                            }
+                        )
+                    raise ProviderDecisionError(
+                        faction_id=faction_id,
+                        provider=config.provider,
+                        model=config.model or "",
+                        message=detail,
+                    )
+                outputs.update(decisions)
+                continue
+
+            for context in contexts:
+                outputs[context.agent.id] = self.decide(context)
+        return outputs
+
     def _adapter_for(self, config: CivilizationProviderConfig):
         cache_key = (
             config.provider,
@@ -383,6 +490,8 @@ class RoutingLLMAdapter:
             config.google_cloud_project or "",
             config.use_vertex,
             config.opencode_provider or "",
+            config.managed_home_id or "",
+            config.execution_mode,
             config.timeout_seconds,
             config.base_url or "",
         )
@@ -416,6 +525,8 @@ class RoutingLLMAdapter:
                     "provider": config.provider,
                     "model": config.model or "",
                     "credential": config.opencode_provider or "",
+                    "execution_mode": config.execution_mode,
+                    "cli_home": config.cli_home or "",
                 }
             )
         return summaries
