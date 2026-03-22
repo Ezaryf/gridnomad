@@ -110,23 +110,18 @@ export default function CivilizationSettingsSheet({
                   <LabeledField label="River count">
                     <Input type="number" min="0" max="20" value={settings.world?.riverCount ?? 8} onChange={(event) => onUpdateWorld({ riverCount: Number(event.target.value) })} />
                   </LabeledField>
-                  <LabeledField label="Settlement density">
-                    <Input type="number" min="0" max="40" value={settings.world?.settlementDensity ?? 10} onChange={(event) => onUpdateWorld({ settlementDensity: Number(event.target.value) })} />
+                  <LabeledField label="Run duration (sec)">
+                    <Input type="number" min="10" max="1800" value={settings.world?.run_duration_seconds ?? 80} onChange={(event) => onUpdateWorld({ run_duration_seconds: Number(event.target.value) })} />
                   </LabeledField>
-                  <LabeledField label="Landmark density">
-                    <Input type="number" min="0" max="40" value={settings.world?.landmarkDensity ?? 16} onChange={(event) => onUpdateWorld({ landmarkDensity: Number(event.target.value) })} />
-                  </LabeledField>
-                  <LabeledField label="Biome density">
-                    <Input type="number" min="0" max="100" value={settings.world?.biomeDensity ?? 62} onChange={(event) => onUpdateWorld({ biomeDensity: Number(event.target.value) })} />
-                  </LabeledField>
-                  <LabeledField label="Reason interval (ticks)">
-                    <Input type="number" min="1" max="60" value={settings.world?.reason_interval ?? 5} onChange={(event) => onUpdateWorld({ reason_interval: Number(event.target.value) })} />
-                  </LabeledField>
-                  <LabeledField label="Perception radius">
-                    <Input type="number" min="1" max="8" value={settings.world?.perception_radius ?? 3} onChange={(event) => onUpdateWorld({ perception_radius: Number(event.target.value) })} />
-                  </LabeledField>
-                  <LabeledField label="Fauna density">
-                    <Input type="number" min="0" max="100" value={settings.world?.fauna_density ?? 12} onChange={(event) => onUpdateWorld({ fauna_density: Number(event.target.value) })} />
+                  <LabeledField label="Playback speed">
+                    <Select value={String(settings.world?.playback_speed ?? 1)} onValueChange={(value) => onUpdateWorld({ playback_speed: Number(value) })}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="1">1x</SelectItem>
+                        <SelectItem value="2">2x</SelectItem>
+                        <SelectItem value="4">4x</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </LabeledField>
                 </CardContent>
               </Card>
@@ -238,6 +233,7 @@ function ControllerCard({
 }) {
   const provider = controller?.provider ?? "heuristic";
   const models = catalog?.models?.length ? catalog.models : controller?.availableModels ?? [];
+  const healthState = catalog?.health_state ?? catalog?.auth_status ?? "local";
 
   return (
     <div className="space-y-4">
@@ -246,7 +242,10 @@ function ControllerCard({
           <h4 className="text-base font-semibold text-zinc-100">{title}</h4>
           <p className="text-sm text-zinc-400">{subtitle}.</p>
         </div>
-        <Badge variant="muted">{providerDisplayName(provider)}</Badge>
+        <div className="flex flex-col items-end gap-1">
+          <Badge variant="muted">{providerDisplayName(provider)}</Badge>
+          {provider === "opencode" ? <Badge variant="outline" className="text-[10px]">{healthState}</Badge> : null}
+        </div>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2">
@@ -275,6 +274,11 @@ function ControllerCard({
 
         {provider === "opencode" ? (
           <>
+            <div className="sm:col-span-2 rounded-xl border border-white/10 bg-white/[0.03] p-3 text-xs leading-5 text-zinc-400">
+              <p className="font-medium text-zinc-200">OpenCode health: {healthState}</p>
+              <p>{catalog?.login_hint ?? "Check the CLI health, then login and refresh models."}</p>
+              {catalog?.detected_cli_home ? <p className="mt-1 text-zinc-500">CLI home: {catalog.detected_cli_home}</p> : null}
+            </div>
             <LabeledField label="OpenCode credential">
               <Select value={controller?.opencodeProvider || "__empty__"} onValueChange={(value) => onCredentialChange(value === "__empty__" ? "" : value)}>
                 <SelectTrigger><SelectValue placeholder="Choose credential" /></SelectTrigger>
@@ -287,6 +291,9 @@ function ControllerCard({
               </Select>
             </LabeledField>
             <div className="flex flex-wrap items-end gap-2 sm:col-span-2">
+              <Button variant="outline" onClick={() => onRefreshProviderCatalog("opencode", controller?.opencodeProvider ?? "")}>
+                Check health
+              </Button>
               <Button variant="outline" onClick={() => onLaunchProviderLogin("opencode")}>
                 <KeyRound className="size-4" />
                 Login

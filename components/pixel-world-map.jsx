@@ -27,6 +27,7 @@ import {
 
 export default function PixelWorldMap({
   world,
+  liveFrame,
   overlays,
   selectedTile,
   selectedHumanId,
@@ -45,12 +46,16 @@ export default function PixelWorldMap({
   const [zoomPercent, setZoomPercent] = useState(0);
   const [hoveredTile, setHoveredTile] = useState(null);
 
-  const worldSignature = useMemo(() => {
+  const staticWorldSignature = useMemo(() => {
     if (!world) {
       return "empty";
     }
-    return `${world.seed}:${world.width}x${world.height}:${world.tick ?? 0}:${world.props?.length ?? 0}:${world.settlements?.length ?? 0}`;
+    return `${world.seed}:${world.width}x${world.height}:${world.props?.length ?? 0}:${world.settlements?.length ?? 0}:${countTerrain(world, "house")}:${countTerrain(world, "farm")}`;
   }, [world]);
+  const staticRenderSignature = useMemo(
+    () => `${staticWorldSignature}:${overlays?.roads ? 1 : 0}:${overlays?.resources ? 1 : 0}:${overlays?.structures === false ? 0 : 1}:${overlays?.territories ? 1 : 0}`,
+    [staticWorldSignature, overlays]
+  );
 
   useEffect(() => {
     worldRef.current = world;
@@ -188,11 +193,10 @@ export default function PixelWorldMap({
         fogSprites: [],
         lastHudZoom: -1,
         lastFittedSignature: "",
+        lastRenderedStaticSignature: "",
         worldSignature: ""
       };
       runtimeRef.current = runtime;
-
-      addFog(runtime);
 
       const resizeObserver = new ResizeObserver(() => {
         if (!runtimeRef.current || !stageRef.current) {
@@ -258,8 +262,8 @@ export default function PixelWorldMap({
         runtimeRef.current = null;
         app.destroy(true);
       };
-
-      renderWorld(runtime, worldRef.current, overlays, worldSignature);
+      renderStaticWorld(runtime, worldRef.current, overlays, staticRenderSignature);
+      renderDynamicWorld(runtime, worldRef.current, overlays, liveFrame, selectedHumanId);
       syncFocusSprites(runtime, selectedTileRef.current, hoverTileRef.current);
       updateZoomHud(runtime, setZoomPercent);
     }
@@ -275,9 +279,17 @@ export default function PixelWorldMap({
     if (!runtimeRef.current) {
       return;
     }
-    renderWorld(runtimeRef.current, world, overlays, worldSignature);
+    renderStaticWorld(runtimeRef.current, world, overlays, staticRenderSignature);
     syncFocusSprites(runtimeRef.current, selectedTile, hoverTileRef.current);
-  }, [world, overlays, worldSignature]);
+  }, [world, overlays, staticRenderSignature, selectedTile]);
+
+  useEffect(() => {
+    if (!runtimeRef.current) {
+      return;
+    }
+    renderDynamicWorld(runtimeRef.current, world, overlays, liveFrame, selectedHumanId);
+    syncFocusSprites(runtimeRef.current, selectedTile, hoverTileRef.current);
+  }, [world, liveFrame, overlays?.humans, selectedHumanId, selectedTile]);
 
   function nudgeZoom(multiplier) {
     const runtime = runtimeRef.current;
@@ -335,13 +347,16 @@ export default function PixelWorldMap({
 }
 
 
-function renderWorld(runtime, world, overlays, worldSignature) {
+function renderStaticWorld(runtime, world, overlays, worldSignature) {
   if (!runtime || !world) {
     return;
   }
   runtime.world = world;
   runtime.worldSignature = worldSignature;
-  runtime.agentTweens = [];
+  if (runtime.lastRenderedStaticSignature === worldSignature) {
+    return;
+  }
+  runtime.lastRenderedStaticSignature = worldSignature;
   runtime.animatedGlints = [];
 
   const {
@@ -531,83 +546,74 @@ function renderWorld(runtime, world, overlays, worldSignature) {
     }
   }
 
-  if (overlays?.humans) {
-    const nextAgentPositions = new Map();
-    const nextHumanHitTargets = [];
-    const tileSlots = new Map();
-    for (const agent of Object.values(world.humans ?? world.agents ?? {})) {
-      if (agent.alive === false) {
-        continue;
-      }
-      const tileKey = `${agent.x}:${agent.y}`;
-      const slot = tileSlots.get(tileKey) ?? 0;
-      tileSlots.set(tileKey, slot + 1);
-      const offset = swarmSlotOffset(slot);
-      const shift = (world.tiles?.[agent.y]?.[agent.x]?.height_level ?? 0) * 2;
-      const sprite = buildHumanMarker(runtime, Sprite, factionTint(agent.faction_id));
-      const targetX = (agent.x * TILE_SIZE) + (TILE_SIZE / 2) + offset.x;
-      const targetY = (agent.y * TILE_SIZE) + (TILE_SIZE / 2) + offset.y - shift;
-      const previous = runtime.agentPositions.get(agent.id) ?? { x: targetX, y: targetY };
-      sprite.x = previous.x;
-      sprite.y = previous.y;
-      agentLayer.addChild(sprite);
-      runtime.agentTweens.push({
-        sprite,
-        startX: previous.x,
-        startY: previous.y,
-        targetX,
-        targetY,
-        elapsed: 0,
-        duration: 680,
-        bobPhase: (agent.x * 19) + (agent.y * 7),
-        bobAmount: 0.18
-      });
-      nextAgentPositions.set(agent.id, { x: targetX, y: targetY });
-      nextHumanHitTargets.push({
-        id: agent.id,
-        name: agent.name,
-        faction_id: agent.faction_id,
-        x: agent.x,
-        y: agent.y,
-        worldX: targetX,
-        worldY: targetY,
-        radius: 7
-      });
-    }
-    runtime.agentPositions = nextAgentPositions;
-    runtime.humanHitTargets = nextHumanHitTargets;
-  } else {
-    runtime.agentPositions = new Map();
-    runtime.humanHitTargets = [];
-  }
-
-  if (overlays?.fauna) {
-    for (const animal of Object.values(world.animals ?? {})) {
-      if (animal.alive === false) {
-        continue;
-      }
-      const shift = (world.tiles?.[animal.y]?.[animal.x]?.height_level ?? 0) * 2;
-      const sprite = buildAnimalMarker(runtime, Sprite, animalTint(animal.species));
-      sprite.x = (animal.x * TILE_SIZE) + (TILE_SIZE / 2);
-      sprite.y = (animal.y * TILE_SIZE) + (TILE_SIZE / 2) - shift;
-      faunaLayer.addChild(sprite);
-    }
-  }
-
-  if (overlays?.battles) {
-    for (const battle of Object.values(world.battles ?? {})) {
-      const pulse = Sprite.from(resolveAtlasAsset("overlay-tint"));
-      pulse.x = (battle.x * TILE_SIZE) + 2;
-      pulse.y = (battle.y * TILE_SIZE) + 2;
-      pulse.width = TILE_SIZE - 4;
-      pulse.height = TILE_SIZE - 4;
-      pulse.tint = 0xff715b;
-      pulse.alpha = 0.35;
-      runtime.layers.fxLayer.addChild(pulse);
-    }
-  }
-
   maybeFitWorld(runtime, world, false);
+}
+
+function renderDynamicWorld(runtime, world, overlays, liveFrame, selectedHumanId) {
+  if (!runtime || !world) {
+    return;
+  }
+  const { Sprite } = runtime.pixi;
+  const { agentLayer, faunaLayer } = runtime.layers;
+  clearLayer(agentLayer);
+  clearLayer(faunaLayer);
+
+  if (!overlays?.humans) {
+    runtime.humanHitTargets = [];
+    return;
+  }
+
+  const frameHumans = Array.isArray(liveFrame?.humans) ? liveFrame.humans : null;
+  const humansById = Object.fromEntries(Object.values(world.humans ?? world.agents ?? {}).map((human) => [human.id, human]));
+  const tileSlots = new Map();
+  const nextHumanHitTargets = [];
+
+  const humans = frameHumans
+    ? frameHumans.filter((human) => human.alive !== false)
+    : Object.values(world.humans ?? world.agents ?? {}).filter((human) => human.alive !== false).map((human) => ({
+        id: human.id,
+        x: human.x,
+        y: human.y,
+        render_x: human.render_x ?? human.x,
+        render_y: human.render_y ?? human.y,
+        state: human.task_state ?? "idle",
+        speaking: false
+      }));
+
+  for (const human of humans) {
+    const source = humansById[human.id];
+    if (!source) {
+      continue;
+    }
+    const tileKey = `${human.x}:${human.y}`;
+    const slot = tileSlots.get(tileKey) ?? 0;
+    tileSlots.set(tileKey, slot + 1);
+    const offset = swarmSlotOffset(slot);
+    const shift = (world.tiles?.[human.y]?.[human.x]?.height_level ?? 0) * 2;
+    const sprite = buildHumanMarker(runtime, Sprite, factionTint(source.faction_id), {
+      selected: source.id === selectedHumanId,
+      active: human.state && human.state !== "idle",
+      speaking: Boolean(human.speaking)
+    });
+    const worldX = ((human.render_x ?? human.x) * TILE_SIZE) + (TILE_SIZE / 2) + offset.x;
+    const worldY = ((human.render_y ?? human.y) * TILE_SIZE) + (TILE_SIZE / 2) + offset.y - shift;
+    sprite.x = worldX;
+    sprite.y = worldY;
+    agentLayer.addChild(sprite);
+
+    nextHumanHitTargets.push({
+      id: source.id,
+      name: source.name,
+      faction_id: source.faction_id,
+      x: human.x,
+      y: human.y,
+      worldX,
+      worldY,
+      radius: source.id === selectedHumanId ? 8 : 6
+    });
+  }
+
+  runtime.humanHitTargets = nextHumanHitTargets;
 }
 
 function generateProceduralTextures(runtime) {
@@ -977,13 +983,13 @@ function easeOutCubic(value) {
 }
 
 
-function buildHumanMarker(runtime, Sprite, tint) {
+function buildHumanMarker(runtime, Sprite, tint, { selected = false, active = false, speaking = false } = {}) {
   const sprite = new Sprite(runtime.proceduralTextures["swarm-dot"]);
   sprite.anchor.set(0.5);
-  sprite.width = 4;
-  sprite.height = 4;
+  sprite.width = selected ? 5 : 4;
+  sprite.height = selected ? 5 : 4;
   sprite.tint = tint;
-  sprite.alpha = 0.98;
+  sprite.alpha = speaking ? 1 : active ? 0.96 : 0.9;
   return sprite;
 }
 
@@ -1029,4 +1035,17 @@ function animalTint(species) {
   if (species === "chickens") return 0xf5d56b;
   if (species === "cows") return 0xcaa28f;
   return 0xf5f2ea;
+}
+
+
+function countTerrain(world, terrain) {
+  let count = 0;
+  for (const row of world?.tiles ?? []) {
+    for (const tile of row) {
+      if (tile?.terrain === terrain) {
+        count += 1;
+      }
+    }
+  }
+  return count;
 }
