@@ -8,6 +8,7 @@ import {
 } from "@/lib/civilization-setup";
 import {
   ensureProjectData,
+  inspectGemini,
   inspectOpencode
 } from "@/lib/gridnomad-store";
 
@@ -18,14 +19,13 @@ export async function GET(request) {
   const provider = String(url.searchParams.get("provider") ?? "heuristic");
 
   if (provider === "gemini-cli") {
+    const googleCloudProject = url.searchParams.get("googleCloudProject") ?? "";
+    const inspection = await inspectGemini({ googleCloudProject });
     return NextResponse.json({
-      ok: true,
-      provider,
+      ...inspection,
       models: GEMINI_MODELS,
       supports_model_listing: true,
       supports_manual_model_entry: true,
-      auth_status: "cli-login-or-api-key",
-      login_hint: "Use Gemini CLI login or enter an API key."
     });
   }
 

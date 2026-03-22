@@ -4,10 +4,11 @@ import { spawn } from "node:child_process";
 
 import { NextResponse } from "next/server";
 
-import { buildRuntimeControllerMap, normalizeSettings, STRICT_MAX_TOTAL_POPULATION, synthesizeScenario } from "@/lib/civilization-setup";
+import { buildRuntimeControllerMap, humanNameValidation, normalizeSettings, STRICT_MAX_TOTAL_POPULATION, synthesizeScenario } from "@/lib/civilization-setup";
 import {
   ROOT,
   ensureProjectData,
+  inspectGemini,
   inspectOpencode,
   readScenario,
   readSettings,
@@ -126,6 +127,15 @@ function quoteWindowsArgument(value) {
 
 async function validateStrictSimulationSetup(settings) {
   const groups = settings.groups ?? [];
+  const nameValidation = humanNameValidation(settings);
+  if (!nameValidation.valid) {
+    return {
+      ok: false,
+      reason: "invalid_names",
+      message: nameValidation.message,
+      validation: nameValidation,
+    };
+  }
   const totalPopulation = groups.reduce((sum, group) => sum + Number(group.population_count ?? 0), 0);
   if (totalPopulation > STRICT_MAX_TOTAL_POPULATION) {
     return {
@@ -189,6 +199,35 @@ async function validateStrictSimulationSetup(settings) {
         group_id: group.id,
         provider,
       };
+    }
+    if (provider === "gemini-cli") {
+      if (!model) {
+        return {
+          ok: false,
+          reason: "model_required",
+          message: `${group.name} must choose a Gemini CLI model before starting a strict run.`,
+          group_id: group.id,
+          provider,
+        };
+      }
+      if (String(controller.apiKey ?? controller.googleApiKey ?? "").trim()) {
+        continue;
+      }
+      const inspection = await inspectGemini({
+        googleCloudProject: controller.googleCloudProject ?? "",
+      });
+      if (inspection.health_state !== "ready") {
+        return {
+          ok: false,
+          reason: inspection.health_state,
+          message: `${group.name} is not ready for Gemini CLI: ${inspection.login_hint}`,
+          group_id: group.id,
+          provider,
+          health_state: inspection.health_state,
+          gemini_path: inspection.gemini_path,
+        };
+      }
+      continue;
     }
     if (!model) {
       return {
