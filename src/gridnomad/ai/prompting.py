@@ -25,6 +25,16 @@ class AgentPromptView:
     social_style: str
     resource_bias: str
     starting_drive: str
+    weapon_kind: str
+    bonded_partner_id: str | None
+    home_structure_id: str | None
+    last_world_action_summary: str
+    position_history: list[dict[str, int]]
+    visited_tiles: dict[str, int]
+    stuck_steps: int
+    last_failed_action_reason: str
+    last_success_summary: str
+    repeated_message_streak: int
     memory: AgentMemoryView
     x: int
     y: int
@@ -41,6 +51,16 @@ class AgentPromptView:
             social_style=agent.social_style,
             resource_bias=agent.resource_bias,
             starting_drive=agent.starting_drive,
+            weapon_kind=agent.weapon_kind,
+            bonded_partner_id=agent.bonded_partner_id,
+            home_structure_id=agent.home_structure_id,
+            last_world_action_summary=agent.last_world_action_summary,
+            position_history=list(agent.position_history),
+            visited_tiles=dict(agent.visited_tiles),
+            stuck_steps=agent.stuck_steps,
+            last_failed_action_reason=agent.last_failed_action_reason,
+            last_success_summary=agent.last_success_summary,
+            repeated_message_streak=agent.repeated_message_streak,
             memory=AgentMemoryView(memories=memories),
             x=agent.x,
             y=agent.y,
@@ -68,6 +88,16 @@ You belong to the group {agent.group}. The AI controlling your group should beha
 - Social style: {agent.social_style or "None provided"}
 - Resource bias: {agent.resource_bias or "None provided"}
 - Starting drive: {agent.starting_drive or "None provided"}
+- Weapon: {agent.weapon_kind or "none"}
+- Bonded partner id: {agent.bonded_partner_id or "none"}
+- Home structure id: {agent.home_structure_id or "none"}
+- Last successful world-changing action: {agent.last_world_action_summary or "None"}
+- Recent position trail: {agent.position_history[-6:] or "None recorded yet"}
+- Distinct visited tiles tracked: {len(agent.visited_tiles)}
+- Local loop / stuck streak: {agent.stuck_steps}
+- Last failed action reason: {agent.last_failed_action_reason or "None"}
+- Last successful action summary: {agent.last_success_summary or "None"}
+- Repeated speech/message streak: {agent.repeated_message_streak}
 
 ## Your Current State:
 - Emotions (0-10): Joy={agent.emotions.joy}, Sadness={agent.emotions.sadness}, Fear={agent.emotions.fear}, Anger={agent.emotions.anger}, Disgust={agent.emotions.disgust}, Surprise={agent.emotions.surprise}
@@ -92,6 +122,9 @@ Your group's culture summary: {cultural_context}
 - CONSUME
 - GATHER
 - BUILD
+- CRAFT
+- ATTACK
+- REPRODUCE
 - TRANSFER
 - COMMUNICATE
 
@@ -104,6 +137,11 @@ Your group's culture summary: {cultural_context}
 6. Optionally include one short spoken line if you would naturally say something.
 7. Update your emotions and needs honestly based on what just happened.
 8. Generate one short thought that sounds like your inner voice.
+9. Avoid pacing in place or repeating the same scout message. If you have stayed in the same small area too long, commit to a direction toward a frontier or useful resource.
+10. If you choose GATHER, you must include gather_mode from: cut_tree, quarry_stone, forage_food, collect_water.
+11. If you choose BUILD, you must include build_kind from: home, bridge.
+12. If you choose CRAFT, you must include craft_kind from: weapon.
+13. If you choose ATTACK or REPRODUCE, you must include target_agent_id for the specific nearby human.
 
 Output only valid JSON with this structure:
 {{
@@ -115,6 +153,9 @@ Output only valid JSON with this structure:
   "intent": "Take one step toward the river so I can look for water and anyone who needs help.",
   "speech": "I am stepping east toward the river.",
   "target_resource_kind": "food",
+  "gather_mode": null,
+  "build_kind": null,
+  "craft_kind": null,
   "interaction_mode": "support",
   "desired_distance": 1,
   "updated_emotions": {{
@@ -142,6 +183,11 @@ Important:
 - Keep speech short and natural.
 - Use target_agent_id whenever you are choosing to talk to, help, follow, avoid, or confront a specific nearby human.
 - Do not output generic MOVE. Use only MOVE_NORTH, MOVE_SOUTH, MOVE_EAST, or MOVE_WEST for movement.
+- If you choose GATHER, BUILD, or CRAFT, include the specific gather_mode, build_kind, or craft_kind.
+- If you choose ATTACK, only do it when you can explain the reason in survival, fear, anger, revenge, theft, protection, or conflict terms.
+- If you choose REPRODUCE, only do it when the nearby bonded partner, home, and supplies make it make sense.
+- If your recent position trail shows you are looping locally, stop repeating the same scout move and commit toward the least-explored direction or the best visible resource.
+- Do not repeat the same spoken line or group message unless something materially changed.
 - Do not invent kingdoms, races, cities, or fantasy systems. This is a group-of-humans simulator.
 
 Now respond with your JSON decision.
@@ -158,10 +204,15 @@ Important rules:
 - Do not skip anyone.
 - Decide only the next immediate step for each human.
 - Every action must be one of:
-  MOVE_NORTH, MOVE_SOUTH, MOVE_EAST, MOVE_WEST, REST, INTERACT, CONSUME, GATHER, BUILD, TRANSFER, COMMUNICATE
+  MOVE_NORTH, MOVE_SOUTH, MOVE_EAST, MOVE_WEST, REST, INTERACT, CONSUME, GATHER, BUILD, CRAFT, ATTACK, REPRODUCE, TRANSFER, COMMUNICATE
 - Use target_agent_id when a human is reacting to a specific nearby human.
 - Keep speech short and natural.
 - Preserve each human's individuality using their persona, personality, current needs, emotions, inventory, memories, and perception.
+- If a human is caught in a local loop or has repeated the same message, change strategy and commit to a clearer direction or useful target.
+- GATHER requires gather_mode from: cut_tree, quarry_stone, forage_food, collect_water.
+- BUILD requires build_kind from: home, bridge.
+- CRAFT requires craft_kind from: weapon.
+- ATTACK and REPRODUCE require target_agent_id.
 - This is a group-of-humans simulator. Do not invent kingdoms, races, cities, or other systems.
 
 Group culture summary:
@@ -183,6 +234,9 @@ Return only valid JSON in this exact shape:
       "intent": "Short human-readable goal.",
       "speech": "Optional short speech.",
       "target_resource_kind": "food",
+      "gather_mode": null,
+      "build_kind": null,
+      "craft_kind": null,
       "interaction_mode": "support",
       "desired_distance": 1,
       "updated_emotions": {{

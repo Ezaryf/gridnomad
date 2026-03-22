@@ -53,10 +53,13 @@ class HeuristicLLMAdapter:
         outbound_message: OutboundMessage | None = None
         interaction_mode: str | None = None
         target_resource_kind: str | None = None
+        gather_mode: str | None = None
+        build_kind: str | None = None
+        craft_kind: str | None = None
 
         if perception.hostile_agents:
             hostile = agent_context.world.agents[perception.hostile_agents[0]]
-            action = "INTERACT"
+            action = "ATTACK"
             target_x, target_y = hostile.x, hostile.y
             target_agent_id = hostile.id
             reason = f"{hostile.name} feels dangerous, so I need to confront the situation carefully."
@@ -76,6 +79,7 @@ class HeuristicLLMAdapter:
             intent = "Find food or usable materials before my survival need gets worse."
             speech = "I need food and supplies soon."
             target_resource_kind = "food"
+            gather_mode = "forage_food"
             outbound_message = OutboundMessage(
                 scope="civilization",
                 text="I am searching this area for food and supplies."
@@ -85,6 +89,7 @@ class HeuristicLLMAdapter:
             reason = "I want a safer place to recover and I have enough materials to start something small."
             intent = "Build a simple shelter or marker that makes this area feel safer."
             speech = "I can turn this spot into a safer resting place."
+            build_kind = "home"
             outbound_message = OutboundMessage(
                 scope="civilization",
                 text="I am starting a small shelter here if anyone needs a safe place."
@@ -179,6 +184,9 @@ class HeuristicLLMAdapter:
             thought=thought,
             target_agent_id=target_agent_id,
             target_resource_kind=target_resource_kind,
+            gather_mode=gather_mode,
+            build_kind=build_kind,
+            craft_kind=craft_kind,
             interaction_mode=interaction_mode,
             cultural_innovation=cultural_innovation,
             outbound_message=outbound_message,

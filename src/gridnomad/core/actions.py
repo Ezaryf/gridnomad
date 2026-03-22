@@ -18,6 +18,9 @@ PRIMITIVE_ACTIONS = {
     "CONSUME",
     "GATHER",
     "BUILD",
+    "CRAFT",
+    "ATTACK",
+    "REPRODUCE",
     "TRANSFER",
     "COMMUNICATE",
 }
@@ -65,9 +68,34 @@ class ActionRegistry:
                 target_agent_id=None if target_agent is None else target_agent.id,
             )
 
-        if action in {"REST", "CONSUME", "GATHER", "BUILD"}:
+        if action in {"ATTACK", "REPRODUCE"}:
+            target_agent = self._resolve_target_agent(decision, world_state, actor)
+            return EngineAction(
+                kind=action,
+                actor_id=actor.id,
+                target_x=None if target_agent is None else target_agent.x,
+                target_y=None if target_agent is None else target_agent.y,
+                target_agent_id=None if target_agent is None else target_agent.id,
+                metadata={
+                    "interaction_mode": decision.interaction_mode,
+                },
+            )
+
+        if action in {"REST", "CONSUME", "GATHER", "BUILD", "CRAFT"}:
             target_x, target_y = self._resolve_target_tile(decision, world_state, actor)
-            return EngineAction(kind=action, actor_id=actor.id, target_x=target_x, target_y=target_y)
+            return EngineAction(
+                kind=action,
+                actor_id=actor.id,
+                target_x=target_x,
+                target_y=target_y,
+                metadata={
+                    "target_resource_kind": decision.target_resource_kind,
+                    "gather_mode": decision.gather_mode,
+                    "build_kind": decision.build_kind,
+                    "craft_kind": decision.craft_kind,
+                    "interaction_mode": decision.interaction_mode,
+                },
+            )
 
         return EngineAction(kind="NO_OP", actor_id=actor.id, metadata={"reason": "Unhandled action"})
 

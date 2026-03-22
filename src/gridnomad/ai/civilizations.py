@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
 import threading
 from dataclasses import dataclass, field
@@ -70,6 +71,64 @@ def build_cli_environment(cli_home: str | None = None, extra: dict[str, str] | N
             if value:
                 env[key] = value
     return env
+
+
+def _discover_cli_candidates(command_name: str) -> list[str]:
+    candidates: list[str] = []
+
+    def add_candidate(path_value: str | None) -> None:
+        if not path_value:
+            return
+        normalized = str(Path(path_value).resolve())
+        if normalized not in candidates:
+            candidates.append(normalized)
+
+    if os.name == "nt":
+        for candidate in (
+            f"{command_name}.cmd",
+            f"{command_name}.exe",
+            f"{command_name}.bat",
+            f"{command_name}.ps1",
+            command_name,
+        ):
+            add_candidate(shutil.which(candidate))
+
+        where_executable = shutil.which("where.exe") or shutil.which("where")
+        if where_executable:
+            completed = subprocess.run(
+                [where_executable, command_name],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+            for line in completed.stdout.splitlines():
+                add_candidate(line.strip())
+    else:
+        add_candidate(shutil.which(command_name))
+
+    return candidates
+
+
+def _resolve_cli_command(command_name: str) -> tuple[list[str], str]:
+    candidates = _discover_cli_candidates(command_name)
+    if not candidates:
+        raise RuntimeError(f"{command_name} CLI was not found on this machine.")
+
+    resolved = candidates[0]
+    if os.name == "nt" and resolved.lower().endswith(".ps1"):
+        shell = (
+            shutil.which("pwsh.exe")
+            or shutil.which("pwsh")
+            or shutil.which("powershell.exe")
+            or shutil.which("powershell")
+        )
+        if not shell:
+            raise RuntimeError(
+                f"{command_name} was found at {resolved}, but no PowerShell executable was available to launch it."
+            )
+        return [shell, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", resolved], resolved
+    return [resolved], resolved
 
 
 @dataclass(slots=True)
@@ -279,9 +338,19 @@ class GeminiCLIAdapter:
     def __init__(self, config: CivilizationProviderConfig, *, project_dir: Path | None = None) -> None:
         self.config = config
         self.project_dir = Path(project_dir or Path.cwd()).resolve()
+        self._command_prefix: list[str] | None = None
+        self._resolved_command: str | None = None
+
+    def _command_base(self) -> list[str]:
+        if self._command_prefix is None or self._resolved_command is None:
+            self._command_prefix, self._resolved_command = _resolve_cli_command("gemini")
+        command = list(self._command_prefix)
+        command.extend(["-p"])
+        return command
 
     def decide(self, agent_context: AgentContext) -> str:
-        command = ["gemini", "-p", agent_context.prompt]
+        command = self._command_base()
+        command.append(agent_context.prompt)
         if self.config.model:
             command.extend(["-m", self.config.model])
         env_extra = {
@@ -302,9 +371,11 @@ class GeminiCLIAdapter:
         )
         output = completed.stdout.strip() or completed.stderr.strip()
         if completed.returncode != 0 and not output:
-            raise RuntimeError("Gemini CLI returned no output.")
+            resolved_hint = f" via {self._resolved_command}" if self._resolved_command else ""
+            raise RuntimeError(f"Gemini CLI returned no output{resolved_hint}.")
         if completed.returncode != 0 and completed.stdout.strip() == "":
-            raise RuntimeError(output)
+            resolved_hint = f" via {self._resolved_command}" if self._resolved_command else ""
+            raise RuntimeError(f"{output}{resolved_hint}")
         return _clean_cli_output(output)
 
 
@@ -357,10 +428,16 @@ class OpenCodeCLIAdapter:
                 "social_style": context.agent.social_style,
                 "resource_bias": context.agent.resource_bias,
                 "starting_drive": context.agent.starting_drive,
+                "weapon_kind": context.agent.weapon_kind,
+                "bonded_partner_id": context.agent.bonded_partner_id,
+                "home_structure_id": context.agent.home_structure_id,
+                "last_world_action_summary": context.agent.last_world_action_summary,
                 "personality": context.agent.personality.to_dict(),
                 "emotions": context.agent.emotions.to_dict(),
                 "needs": context.agent.needs.to_dict(),
                 "inventory": context.agent.inventory.to_dict(),
+                "position_history": list(context.agent.position_history),
+                "visited_tiles": dict(context.agent.visited_tiles),
                 "recent_events": list(context.recent_events),
                 "recent_memories": list(context.memories),
                 "recent_messages": dict(context.recent_messages),

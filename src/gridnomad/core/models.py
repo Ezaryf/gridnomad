@@ -282,12 +282,20 @@ class TileState:
     terrain: TileType = TileType.PLAIN
     farmable: bool = False
     resource: str | None = None
+    wood_stock: int = 0
+    stone_stock: int = 0
+    food_stock: int = 0
+    water_access: bool = False
+    tree_cover: int = 0
     owner_faction: str | None = None
     farm_progress: int = 0
     biome: str = "grassland"
     elevation: int = 0
     moisture: int = 0
     feature: str | None = None
+    structure_kind: str | None = None
+    structure_id: str | None = None
+    resource_depleted_at: int | None = None
     region_id: str | None = None
     settlement_id: str | None = None
     visual_variant: int = 0
@@ -309,12 +317,20 @@ class TileState:
             terrain=TileType(data.get("terrain", TileType.PLAIN)),
             farmable=bool(data.get("farmable", False)),
             resource=data.get("resource"),
+            wood_stock=require_int("wood_stock", data.get("wood_stock", 0), 0),
+            stone_stock=require_int("stone_stock", data.get("stone_stock", 0), 0),
+            food_stock=require_int("food_stock", data.get("food_stock", 0), 0),
+            water_access=bool(data.get("water_access", False)),
+            tree_cover=require_int("tree_cover", data.get("tree_cover", 0), 0, 10, clamp=True),
             owner_faction=data.get("owner_faction", data.get("owner_faction_id")),
             farm_progress=require_int("farm_progress", data.get("farm_progress", 0), 0),
             biome=str(data.get("biome", "grassland")),
             elevation=require_int("elevation", data.get("elevation", 0), 0, 100, clamp=True),
             moisture=require_int("moisture", data.get("moisture", 0), 0, 100, clamp=True),
             feature=data.get("feature"),
+            structure_kind=data.get("structure_kind"),
+            structure_id=data.get("structure_id"),
+            resource_depleted_at=None if data.get("resource_depleted_at") is None else require_int("resource_depleted_at", data.get("resource_depleted_at"), 0),
             region_id=data.get("region_id"),
             settlement_id=data.get("settlement_id"),
             visual_variant=require_int("visual_variant", data.get("visual_variant", 0), 0, 16, clamp=True),
@@ -337,7 +353,7 @@ class TileState:
 
     @property
     def buildable(self) -> bool:
-        return self.passable and self.feature not in {"mountain", "cliff", "landmark"}
+        return self.passable and self.feature not in {"mountain", "cliff", "landmark"} and self.structure_kind is None
 
     def describe(self) -> str:
         bits: list[str] = []
@@ -351,14 +367,28 @@ class TileState:
             bits.append("house")
         elif self.terrain == TileType.FARM:
             bits.append("farm")
+        elif self.structure_kind:
+            bits.append(self.structure_kind)
         elif self.feature:
             bits.append(self.feature)
         else:
             bits.append(self.biome or "plain")
         if self.biome and self.biome not in bits:
             bits.append(self.biome)
+        if self.tree_cover > 0:
+            bits.append("trees")
+        if self.structure_kind and self.structure_kind not in bits:
+            bits.append(self.structure_kind)
         if self.resource:
             bits.append(self.resource)
+        if self.food_stock > 0 and "food" not in bits:
+            bits.append("food")
+        if self.wood_stock > 0 and "wood" not in bits:
+            bits.append("wood")
+        if self.stone_stock > 0 and "stone" not in bits:
+            bits.append("stone")
+        if self.water_access and "water" not in bits:
+            bits.append("water")
         if self.farmable and self.terrain == TileType.PLAIN:
             bits.append("farmable")
         if self.settlement_id:
@@ -370,12 +400,20 @@ class TileState:
             "terrain": self.terrain.value,
             "farmable": self.farmable,
             "resource": self.resource,
+            "wood_stock": self.wood_stock,
+            "stone_stock": self.stone_stock,
+            "food_stock": self.food_stock,
+            "water_access": self.water_access,
+            "tree_cover": self.tree_cover,
             "owner_faction": self.owner_faction,
             "farm_progress": self.farm_progress,
             "biome": self.biome,
             "elevation": self.elevation,
             "moisture": self.moisture,
             "feature": self.feature,
+            "structure_kind": self.structure_kind,
+            "structure_id": self.structure_id,
+            "resource_depleted_at": self.resource_depleted_at,
             "region_id": self.region_id,
             "settlement_id": self.settlement_id,
             "visual_variant": self.visual_variant,
@@ -473,6 +511,14 @@ class AgentState:
     resource_bias: str = ""
     starting_drive: str = ""
     inventory: Inventory = field(default_factory=Inventory)
+    weapon_kind: str = ""
+    bonded_partner_id: str | None = None
+    bond_levels: dict[str, int] = field(default_factory=dict)
+    home_structure_id: str | None = None
+    reproduction_cooldown_ticks: int = 0
+    pregnancy_ticks_remaining: int = 0
+    pregnancy_partner_id: str | None = None
+    last_world_action_summary: str = ""
     entity_kind: str = "human"
     race_kind: str = "human"
     kingdom_id: str | None = None
@@ -488,9 +534,16 @@ class AgentState:
     current_intent: str = ""
     last_speech: str = ""
     last_thought: str = ""
+    last_failed_action_reason: str = ""
+    last_success_summary: str = ""
+    last_communication_text: str = ""
+    repeated_message_streak: int = 0
     age_ticks: int = 0
     tick_born: int = 0
     critical_survival_ticks: int = 0
+    stuck_steps: int = 0
+    position_history: list[dict[str, int]] = field(default_factory=list)
+    visited_tiles: dict[str, int] = field(default_factory=dict)
     render_x: float | None = None
     render_y: float | None = None
     task_state: str = "idle"
@@ -513,6 +566,17 @@ class AgentState:
             social_style=str(data.get("social_style", data.get("socialStyle", ""))),
             resource_bias=str(data.get("resource_bias", data.get("resourceBias", ""))),
             starting_drive=str(data.get("starting_drive", data.get("startingDrive", ""))),
+            weapon_kind=str(data.get("weapon_kind", "")),
+            bonded_partner_id=data.get("bonded_partner_id"),
+            bond_levels={
+                str(key): require_int(f"bond_levels[{key}]", value, 0, 100, clamp=True)
+                for key, value in dict(data.get("bond_levels", {})).items()
+            },
+            home_structure_id=data.get("home_structure_id"),
+            reproduction_cooldown_ticks=require_int("reproduction_cooldown_ticks", data.get("reproduction_cooldown_ticks", 0), 0),
+            pregnancy_ticks_remaining=require_int("pregnancy_ticks_remaining", data.get("pregnancy_ticks_remaining", 0), 0),
+            pregnancy_partner_id=data.get("pregnancy_partner_id"),
+            last_world_action_summary=str(data.get("last_world_action_summary", "")),
             entity_kind=str(data.get("entity_kind", "human")),
             race_kind=str(data.get("race_kind", "human")),
             kingdom_id=data.get("kingdom_id", data.get("faction_id")),
@@ -531,9 +595,26 @@ class AgentState:
             current_intent=str(data.get("current_intent", "")),
             last_speech=str(data.get("last_speech", "")),
             last_thought=str(data.get("last_thought", "")),
+            last_failed_action_reason=str(data.get("last_failed_action_reason", "")),
+            last_success_summary=str(data.get("last_success_summary", "")),
+            last_communication_text=str(data.get("last_communication_text", "")),
+            repeated_message_streak=require_int("repeated_message_streak", data.get("repeated_message_streak", 0), 0),
             age_ticks=require_int("age_ticks", data.get("age_ticks", 0), 0),
             tick_born=require_int("tick_born", data.get("tick_born", 0), 0),
             critical_survival_ticks=require_int("critical_survival_ticks", data.get("critical_survival_ticks", 0), 0),
+            stuck_steps=require_int("stuck_steps", data.get("stuck_steps", 0), 0),
+            position_history=[
+                {
+                    "x": require_int("position_history.x", item.get("x", 0)),
+                    "y": require_int("position_history.y", item.get("y", 0)),
+                }
+                for item in data.get("position_history", [])
+                if isinstance(item, dict)
+            ],
+            visited_tiles={
+                str(key): require_int(f"visited_tiles[{key}]", value, 0)
+                for key, value in dict(data.get("visited_tiles", {})).items()
+            },
             render_x=None if data.get("render_x") is None else float(data.get("render_x")),
             render_y=None if data.get("render_y") is None else float(data.get("render_y")),
             task_state=str(data.get("task_state", "idle")),
@@ -560,6 +641,14 @@ class AgentState:
             "social_style": self.social_style,
             "resource_bias": self.resource_bias,
             "starting_drive": self.starting_drive,
+            "weapon_kind": self.weapon_kind,
+            "bonded_partner_id": self.bonded_partner_id,
+            "bond_levels": dict(self.bond_levels),
+            "home_structure_id": self.home_structure_id,
+            "reproduction_cooldown_ticks": self.reproduction_cooldown_ticks,
+            "pregnancy_ticks_remaining": self.pregnancy_ticks_remaining,
+            "pregnancy_partner_id": self.pregnancy_partner_id,
+            "last_world_action_summary": self.last_world_action_summary,
             "entity_kind": self.entity_kind,
             "race_kind": self.race_kind,
             "kingdom_id": self.kingdom_id,
@@ -579,9 +668,16 @@ class AgentState:
             "current_intent": self.current_intent,
             "last_speech": self.last_speech,
             "last_thought": self.last_thought,
+            "last_failed_action_reason": self.last_failed_action_reason,
+            "last_success_summary": self.last_success_summary,
+            "last_communication_text": self.last_communication_text,
+            "repeated_message_streak": self.repeated_message_streak,
             "age_ticks": self.age_ticks,
             "tick_born": self.tick_born,
             "critical_survival_ticks": self.critical_survival_ticks,
+            "stuck_steps": self.stuck_steps,
+            "position_history": list(self.position_history),
+            "visited_tiles": dict(self.visited_tiles),
             "render_x": self.x if self.render_x is None else self.render_x,
             "render_y": self.y if self.render_y is None else self.render_y,
             "task_state": self.task_state,
@@ -741,9 +837,12 @@ class StructureState:
     kind: str
     x: int
     y: int
+    owner_faction_id: str | None = None
+    builder_agent_id: str | None = None
     kingdom_id: str | None = None
     city_id: str | None = None
     integrity: int = 10
+    materials: dict[str, int] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "StructureState":
@@ -752,9 +851,15 @@ class StructureState:
             kind=str(data.get("kind", "structure")),
             x=require_int("x", data["x"]),
             y=require_int("y", data["y"]),
+            owner_faction_id=data.get("owner_faction_id", data.get("owner_faction")),
+            builder_agent_id=data.get("builder_agent_id"),
             kingdom_id=data.get("kingdom_id"),
             city_id=data.get("city_id"),
             integrity=require_int("integrity", data.get("integrity", 10), 0, 10, clamp=True),
+            materials={
+                str(key): require_int(f"materials[{key}]", value, 0)
+                for key, value in dict(data.get("materials", {})).items()
+            },
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -763,9 +868,12 @@ class StructureState:
             "kind": self.kind,
             "x": self.x,
             "y": self.y,
+            "owner_faction_id": self.owner_faction_id,
+            "builder_agent_id": self.builder_agent_id,
             "kingdom_id": self.kingdom_id,
             "city_id": self.city_id,
             "integrity": self.integrity,
+            "materials": dict(self.materials),
         }
 
 
@@ -1102,6 +1210,9 @@ class DecisionPayload:
     thought: str
     target_agent_id: str | None = None
     target_resource_kind: str | None = None
+    gather_mode: str | None = None
+    build_kind: str | None = None
+    craft_kind: str | None = None
     interaction_mode: str | None = None
     desired_distance: int | None = None
     cultural_innovation: CulturalInnovation | None = None
@@ -1125,6 +1236,9 @@ class DecisionPayload:
             updated_needs=Needs.from_dict(data["updated_needs"], clamp=clamp_states),
             thought=str(data["thought"]),
             target_resource_kind=None if data.get("target_resource_kind") is None else str(data.get("target_resource_kind")),
+            gather_mode=None if data.get("gather_mode") is None else str(data.get("gather_mode")),
+            build_kind=None if data.get("build_kind") is None else str(data.get("build_kind")),
+            craft_kind=None if data.get("craft_kind") is None else str(data.get("craft_kind")),
             interaction_mode=None if data.get("interaction_mode") is None else str(data.get("interaction_mode")),
             desired_distance=None if data.get("desired_distance") is None else require_int("desired_distance", data.get("desired_distance"), 0, 8, clamp=True),
             cultural_innovation=None if innovation is None else CulturalInnovation.from_dict(innovation),
@@ -1165,6 +1279,12 @@ class DecisionPayload:
         }
         if self.target_resource_kind is not None:
             data["target_resource_kind"] = self.target_resource_kind
+        if self.gather_mode is not None:
+            data["gather_mode"] = self.gather_mode
+        if self.build_kind is not None:
+            data["build_kind"] = self.build_kind
+        if self.craft_kind is not None:
+            data["craft_kind"] = self.craft_kind
         if self.interaction_mode is not None:
             data["interaction_mode"] = self.interaction_mode
         if self.desired_distance is not None:

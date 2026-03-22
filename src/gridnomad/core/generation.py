@@ -207,6 +207,11 @@ def generate_seeded_world(
                         tile.biome = "ocean"
                 tile.moisture = 100
                 tile.fertility = 0
+                tile.water_access = True
+                tile.food_stock = 0
+                tile.wood_stock = 0
+                tile.stone_stock = 0
+                tile.tree_cover = 0
                 tile.resource_tags = ["water"]
                 tile.danger_tags = ["flood"]
                 tile.race_affinity = {"human": 20, "orc": 10, "elf": 15, "dwarf": 5}
@@ -284,6 +289,7 @@ def generate_seeded_world(
             if best_biome == "mountain":
                 tile.feature = "mountain"
                 tile.biome = "mountain"
+                tile.stone_stock = 2 if _hash01(settings.seed + 611, x, y) > 0.35 else 1
                 if _hash01(settings.seed + 923, x, y) > 0.42:
                     tile.resource = "stone"
                 if _hash01(settings.seed + 517, x, y) > 0.93:
@@ -292,6 +298,8 @@ def generate_seeded_world(
                 tile.biome = best_biome
                 if best_biome in {"forest", "jungle"}:
                     tile.feature = "forest"
+                    tile.tree_cover = 2 if _hash01(settings.seed + 621, x, y) > 0.45 else 1
+                    tile.wood_stock = max(tile.wood_stock, tile.tree_cover * 2)
                     if _hash01(settings.seed + 771, x, y) > 0.5:
                         tile.resource = "wood"
                     if _hash01(settings.seed + 557, x, y) > 0.94:
@@ -306,14 +314,19 @@ def generate_seeded_world(
                         )
                 elif best_biome in {"grassland", "meadow", "fertile-plains", "arcane"} and _hash01(settings.seed + 991, x, y) > 0.992:
                     props.append(_prop("grove", x, y, variant=_variant(settings.seed + 59, x, y, 4)))
+                    tile.tree_cover = max(tile.tree_cover, 1)
+                    tile.wood_stock = max(tile.wood_stock, 2)
                 elif best_biome in {"coast", "swamp"} and _hash01(settings.seed + 877, x, y) > 0.975:
                     props.append(_prop("reed-bank", x, y, variant=_variant(settings.seed + 47, x, y, 3)))
                 elif best_biome in {"desert", "savanna", "hills", "volcanic"} and _hash01(settings.seed + 809, x, y) > 0.982:
                     props.append(_prop("stone-outcrop", x, y, variant=_variant(settings.seed + 43, x, y, 3)))
+                    tile.stone_stock = max(tile.stone_stock, 2)
                 if best_biome in {"hills", "volcanic"} and _hash01(settings.seed + 1203, x, y) > 0.8:
                     tile.resource = tile.resource or "stone"
+                    tile.stone_stock = max(tile.stone_stock, 1)
                 if best_biome in {"crystal", "arcane"}:
                     tile.resource = tile.resource or "stone"
+                    tile.stone_stock = max(tile.stone_stock, 1)
 
             tile.farmable = (
                 tile.terrain == TileType.PLAIN
@@ -323,6 +336,10 @@ def generate_seeded_world(
             )
             if tile.resource is None and tile.farmable and _hash01(settings.seed + 1013, x, y) > 0.93:
                 tile.resource = "food"
+            if tile.farmable:
+                tile.food_stock = max(tile.food_stock, 1 + (1 if tile.fertility >= 70 else 0))
+            if water_distance[y][x] <= 1:
+                tile.water_access = True
             tile.resource_tags = _resource_tags_for_tile(tile)
             tile.danger_tags = _danger_tags_for_tile(tile)
             tile.race_affinity = _race_affinity_for_tile(tile)
@@ -805,12 +822,16 @@ def _resource_tags_for_tile(tile: TileState) -> list[str]:
     tags: list[str] = []
     if tile.resource:
         tags.append(tile.resource)
-    if tile.farmable or tile.biome in {"fertile-plains", "grassland", "meadow"}:
+    if tile.food_stock > 0 or tile.farmable or tile.biome in {"fertile-plains", "grassland", "meadow"}:
         tags.append("food")
-    if tile.feature == "forest" or tile.biome in {"forest", "jungle"}:
+    if tile.wood_stock > 0 or tile.tree_cover > 0 or tile.feature == "forest" or tile.biome in {"forest", "jungle"}:
         tags.append("wood")
-    if tile.feature == "mountain" or tile.biome in {"hills", "mountain", "crystal", "volcanic"}:
+    if tile.stone_stock > 0 or tile.feature == "mountain" or tile.biome in {"hills", "mountain", "crystal", "volcanic"}:
         tags.append("stone")
+    if tile.water_access or tile.terrain == TileType.WATER:
+        tags.append("water")
+    if tile.structure_kind:
+        tags.append(tile.structure_kind)
     if tile.biome in {"crystal", "arcane"}:
         tags.append("crystal")
     return sorted(dict.fromkeys(tags))
