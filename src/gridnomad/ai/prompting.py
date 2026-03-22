@@ -38,7 +38,13 @@ class AgentPromptView:
         )
 
 
-def build_agent_prompt(agent, perception: str, recent_events: list[str], cultural_context: str) -> str:
+def build_agent_prompt(
+    agent,
+    perception: str,
+    recent_events: list[str],
+    recent_messages: dict[str, list[str]],
+    cultural_context: str,
+) -> str:
     return f"""
 You are {agent.name}, an AI agent living in the pixel world of GridNomad. You belong to the {agent.faction} faction.
 
@@ -58,6 +64,8 @@ You are {agent.name}, an AI agent living in the pixel world of GridNomad. You be
 ## What You See & Know Right Now:
 **Perception**: {perception}
 **Recent events this tick**: {recent_events}
+**Recent civilization messages**: {recent_messages.get("civilization", [])}
+**Recent diplomatic messages**: {recent_messages.get("diplomacy", [])}
 **Your faction's culture**: {cultural_context}
 **Available actions**:
 - MOVE_NORTH / MOVE_SOUTH / MOVE_EAST / MOVE_WEST
@@ -100,11 +108,18 @@ Output **only valid JSON** with the following structure:
     "Esteem": 5,
     "Self_Actualization": 3
   }},
-  "thought": "Finally, a bridge! I feel hopeful and ready to explore."
+  "thought": "Finally, a bridge! I feel hopeful and ready to explore.",
+  "outbound_message": {{
+    "scope": "civilization",
+    "target_faction_id": null,
+    "target_agent_id": null,
+    "text": "A bridge is going up here. Join me if you can."
+  }}
 }}
 
 Important:
 - All values must be integers between 0 and 10.
+- If you include `outbound_message`, keep it short and concrete. Use `scope` = `civilization` for internal coordination or `diplomacy` for cross-faction communication.
 - If you invent a new cultural idea (norm, taboo, slang, ritual) that you think fits your faction, you can optionally include a "cultural_innovation" field with {{"element": "name", "description": "...", "strength": 0-100}}.
 - Be consistent with your personality: a high-Openness agent is more likely to innovate, a high-Agreeableness agent prefers cooperation, etc.
 - Use your memory and recent events to guide emotional shifts - e.g., winning a battle -> Joy up, Anger down; being ignored -> Belonging down, Sadness up.

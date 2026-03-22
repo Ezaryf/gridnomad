@@ -6,7 +6,6 @@ import { LocateFixed, Minus, Plus } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
-  agentPresentation,
   atlasAssetUrls,
   coastOverlays,
   decalPresentation,
@@ -318,6 +317,7 @@ function renderWorld(runtime, world, overlays, worldSignature) {
   runtime.animatedGlints = [];
 
   const {
+    Container,
     Sprite
   } = runtime.pixi;
   const {
@@ -483,22 +483,23 @@ function renderWorld(runtime, world, overlays, worldSignature) {
     }
   }
 
-  if (overlays?.agents) {
+  if (overlays?.humans) {
     const nextAgentPositions = new Map();
+    const tileSlots = new Map();
     for (const agent of Object.values(world.agents ?? {})) {
       if (agent.alive === false) {
         continue;
       }
-      const presentation = agentPresentation(agent);
-      const sprite = Sprite.from(presentation.asset);
-      sprite.tint = presentation.tint;
-      sprite.anchor.set(0.5);
-      const targetX = (agent.x * TILE_SIZE) + (TILE_SIZE / 2);
-      const targetY = (agent.y * TILE_SIZE) + (TILE_SIZE / 2) - 2;
+      const tileKey = `${agent.x}:${agent.y}`;
+      const slot = tileSlots.get(tileKey) ?? 0;
+      tileSlots.set(tileKey, slot + 1);
+      const offset = swarmSlotOffset(slot);
+      const sprite = buildSwarmMarker(Container, Sprite, factionTint(agent.faction_id), slot);
+      const targetX = (agent.x * TILE_SIZE) + (TILE_SIZE / 2) + offset.x;
+      const targetY = (agent.y * TILE_SIZE) + (TILE_SIZE / 2) + offset.y;
       const previous = runtime.agentPositions.get(agent.id) ?? { x: targetX, y: targetY };
       sprite.x = previous.x;
       sprite.y = previous.y;
-      sprite.scale.set(0.95);
       agentLayer.addChild(sprite);
       runtime.agentTweens.push({
         sprite,
@@ -508,7 +509,8 @@ function renderWorld(runtime, world, overlays, worldSignature) {
         targetY,
         elapsed: 0,
         duration: 680,
-        bobPhase: (agent.x * 19) + (agent.y * 7)
+        bobPhase: (agent.x * 19) + (agent.y * 7),
+        bobAmount: 0.18
       });
       nextAgentPositions.set(agent.id, { x: targetX, y: targetY });
     }
@@ -561,7 +563,10 @@ function animateRuntime(runtime, deltaMs, setZoomPercent) {
     const progress = tween.elapsed / tween.duration;
     const eased = easeOutCubic(progress);
     tween.sprite.x = tween.startX + ((tween.targetX - tween.startX) * eased);
-    tween.sprite.y = tween.startY + ((tween.targetY - tween.startY) * eased) + (Math.sin((performance.now() * 0.004) + tween.bobPhase) * 0.45);
+    tween.sprite.y =
+      tween.startY +
+      ((tween.targetY - tween.startY) * eased) +
+      (Math.sin((performance.now() * 0.004) + tween.bobPhase) * (tween.bobAmount ?? 0.2));
   }
   const pulse = 1 + (Math.sin(performance.now() * 0.005) * 0.05);
   runtime.hoverRing.scale.set(pulse);
@@ -657,4 +662,80 @@ function clamp(value, minimum, maximum) {
 
 function easeOutCubic(value) {
   return 1 - ((1 - value) ** 3);
+}
+
+
+function buildSwarmMarker(Container, Sprite, tint, slot) {
+  const container = new Container();
+
+  const shadow = Sprite.from(resolveAtlasAsset("overlay-tint"));
+  shadow.width = 12;
+  shadow.height = 5;
+  shadow.x = -6;
+  shadow.y = 3;
+  shadow.tint = 0x000000;
+  shadow.alpha = 0.28;
+  container.addChild(shadow);
+
+  const formation = swarmFormation(slot);
+  for (const unit of formation) {
+    const square = Sprite.from(resolveAtlasAsset("overlay-tint"));
+    square.width = unit.size;
+    square.height = unit.size;
+    square.x = unit.x;
+    square.y = unit.y;
+    square.tint = tint;
+    square.alpha = unit.alpha;
+    container.addChild(square);
+  }
+
+  return container;
+}
+
+
+function swarmFormation(slot) {
+  const variant = slot % 4;
+  if (variant === 1) {
+    return [
+      { x: -5, y: -3, size: 4, alpha: 0.88 },
+      { x: -1, y: -4, size: 4, alpha: 0.98 },
+      { x: 4, y: -2, size: 4, alpha: 0.84 },
+      { x: -2, y: 2, size: 3, alpha: 0.78 }
+    ];
+  }
+  if (variant === 2) {
+    return [
+      { x: -4, y: -2, size: 4, alpha: 0.86 },
+      { x: 0, y: -4, size: 5, alpha: 0.98 },
+      { x: 4, y: -1, size: 4, alpha: 0.82 },
+      { x: 1, y: 2, size: 3, alpha: 0.72 }
+    ];
+  }
+  if (variant === 3) {
+    return [
+      { x: -5, y: -1, size: 4, alpha: 0.9 },
+      { x: -1, y: -3, size: 5, alpha: 0.98 },
+      { x: 3, y: -4, size: 4, alpha: 0.84 },
+      { x: 2, y: 1, size: 3, alpha: 0.74 }
+    ];
+  }
+  return [
+    { x: -4, y: -3, size: 4, alpha: 0.86 },
+    { x: 0, y: -3, size: 5, alpha: 0.98 },
+    { x: 4, y: -1, size: 4, alpha: 0.82 },
+    { x: -1, y: 2, size: 3, alpha: 0.74 }
+  ];
+}
+
+
+function swarmSlotOffset(slot) {
+  const offsets = [
+    { x: 0, y: 0 },
+    { x: -3, y: -2 },
+    { x: 3, y: -2 },
+    { x: -2, y: 3 },
+    { x: 3, y: 3 },
+    { x: 0, y: -4 }
+  ];
+  return offsets[slot % offsets.length];
 }

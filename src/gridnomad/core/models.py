@@ -455,6 +455,10 @@ class AgentState:
             inventory=Inventory.from_dict(data.get("inventory")),
             health=require_int("health", data.get("health", STATE_MAX), 0, STATE_MAX),
             alive=bool(data.get("alive", True)),
+            last_reasoned_tick=require_int("last_reasoned_tick", data.get("last_reasoned_tick", -999)),
+            last_action_success=bool(data.get("last_action_success", True)),
+            last_perception_signature=str(data.get("last_perception_signature", "")),
+            last_goal=data.get("last_goal"),
         )
 
     @property
@@ -574,6 +578,7 @@ class WorldState:
     settlements: list[dict[str, Any]] = field(default_factory=list)
     roads: list[dict[str, Any]] = field(default_factory=list)
     territories: dict[str, dict[str, Any]] = field(default_factory=dict)
+    communications: list[CommunicationMessage] = field(default_factory=list)
 
     def in_bounds(self, x: int, y: int) -> bool:
         return 0 <= x < self.width and 0 <= y < self.height
@@ -634,6 +639,7 @@ class WorldState:
             "territories": {
                 faction_id: dict(payload) for faction_id, payload in sorted(self.territories.items())
             },
+            "communications": [message.to_dict() for message in self.communications],
         }
 
 
@@ -682,6 +688,34 @@ class ActionProposal:
 
 
 @dataclass(slots=True)
+class OutboundMessage:
+    scope: str
+    text: str
+    target_faction_id: str | None = None
+    target_agent_id: str | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "OutboundMessage":
+        scope = str(data.get("scope", "civilization"))
+        if scope not in {"civilization", "diplomacy"}:
+            scope = "civilization"
+        return cls(
+            scope=scope,
+            text=str(data.get("text", "")).strip(),
+            target_faction_id=data.get("target_faction_id", data.get("targetFactionId")),
+            target_agent_id=data.get("target_agent_id", data.get("targetAgentId")),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "scope": self.scope,
+            "text": self.text,
+            "target_faction_id": self.target_faction_id,
+            "target_agent_id": self.target_agent_id,
+        }
+
+
+@dataclass(slots=True)
 class DecisionPayload:
     action: str
     target_x: int | None
@@ -692,11 +726,13 @@ class DecisionPayload:
     thought: str
     cultural_innovation: CulturalInnovation | None = None
     action_proposal: ActionProposal | None = None
+    outbound_message: OutboundMessage | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any], *, clamp_states: bool = False) -> "DecisionPayload":
         innovation = data.get("cultural_innovation")
         proposal = data.get("action_proposal")
+        outbound_message = data.get("outbound_message")
         return cls(
             action=str(data["action"]),
             target_x=None if data.get("target_x") is None else require_int("target_x", data["target_x"]),
@@ -707,6 +743,7 @@ class DecisionPayload:
             thought=str(data["thought"]),
             cultural_innovation=None if innovation is None else CulturalInnovation.from_dict(innovation),
             action_proposal=None if proposal is None else ActionProposal.from_dict(proposal),
+            outbound_message=None if outbound_message is None else OutboundMessage.from_dict(outbound_message),
         )
 
     def ensure_action_proposal_for_unknown(self) -> None:
@@ -738,7 +775,48 @@ class DecisionPayload:
             data["cultural_innovation"] = self.cultural_innovation.to_dict()
         if self.action_proposal is not None:
             data["action_proposal"] = self.action_proposal.to_dict()
+        if self.outbound_message is not None:
+            data["outbound_message"] = self.outbound_message.to_dict()
         return data
+
+
+@dataclass(slots=True)
+class CommunicationMessage:
+    tick: int
+    scope: str
+    sender_agent_id: str
+    sender_faction_id: str
+    text: str
+    target_faction_id: str | None = None
+    target_agent_id: str | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "CommunicationMessage":
+        return cls(
+            tick=require_int("tick", data.get("tick", 0), 0),
+            scope=str(data.get("scope", "civilization")),
+            sender_agent_id=str(data["sender_agent_id"]),
+            sender_faction_id=str(data["sender_faction_id"]),
+            text=str(data.get("text", "")).strip(),
+            target_faction_id=data.get("target_faction_id"),
+            target_agent_id=data.get("target_agent_id"),
+        )
+
+    def visible_to_faction(self, faction_id: str) -> bool:
+        if self.scope == "civilization":
+            return self.sender_faction_id == faction_id
+        return faction_id in {self.sender_faction_id, self.target_faction_id}
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "tick": self.tick,
+            "scope": self.scope,
+            "sender_agent_id": self.sender_agent_id,
+            "sender_faction_id": self.sender_faction_id,
+            "text": self.text,
+            "target_faction_id": self.target_faction_id,
+            "target_agent_id": self.target_agent_id,
+        }
 
 
 @dataclass(slots=True)

@@ -4,7 +4,7 @@ import { Card, CardContent } from "@/components/ui/card";
 
 
 const ICONS = {
-  aliveAgents: Activity,
+  aliveHumans: Activity,
   settlements: Castle,
   landmarks: Landmark,
   seed: Orbit
@@ -13,7 +13,7 @@ const ICONS = {
 
 export default function AtlasMetrics({ metrics }) {
   const items = [
-    { key: "aliveAgents", label: "Alive agents", value: metrics.aliveAgents },
+    { key: "aliveHumans", label: "Humans alive", value: metrics.aliveHumans },
     { key: "settlements", label: "Settlements", value: metrics.settlements },
     { key: "landmarks", label: "Landmarks", value: metrics.landmarks },
     { key: "seed", label: "World seed", value: metrics.seed }

@@ -4,7 +4,7 @@ import unittest
 
 from helpers import build_agent, build_simulation, farmable_tile, water_tile
 from gridnomad.ai.adapters import ScriptedLLMAdapter
-from gridnomad.core.models import CulturalInnovation, DecisionPayload, Emotions, Needs
+from gridnomad.core.models import CulturalInnovation, DecisionPayload, Emotions, Needs, OutboundMessage
 from gridnomad.core.perception import build_perception
 
 
@@ -46,6 +46,10 @@ class SimulationTests(unittest.TestCase):
                             strength=70,
                             category="ritual",
                         ),
+                        outbound_message=OutboundMessage(
+                            scope="civilization",
+                            text="The bridge is going up. Meet me at the river."
+                        ),
                     )
                 ]
             }
@@ -68,9 +72,12 @@ class SimulationTests(unittest.TestCase):
         events = simulation.step()
         self.assertTrue(any(event.kind == "BUILD_BRIDGE" and event.success for event in events))
         self.assertTrue(any(event.kind == "CULTURAL_INNOVATION" for event in events))
+        self.assertTrue(any(event.kind == "COMMUNICATION" for event in events))
         self.assertEqual(simulation.world.get_tile(2, 1).terrain.value, "bridge")
         self.assertIn("Building this bridge should help everyone.", simulation.memory_store.recent_thoughts("ada"))
         self.assertIn("Bridge Oath", simulation.culture_store.summarize("red"))
+        self.assertTrue(simulation.world.communications)
+        self.assertIn("bridge is going up", simulation.world.communications[-1].text.lower())
 
     def test_trade_attack_and_alliance_actions_mutate_world(self) -> None:
         ada = build_agent("ada", "red", 1, 1, food=0, wood=2, stone=0)
@@ -129,6 +136,61 @@ class SimulationTests(unittest.TestCase):
         events = simulation.step()
         self.assertTrue(any(event.kind in {"MOVE", "CULTIVATE"} for event in events))
         self.assertTrue(simulation.world.agents["ada"].alive)
+
+    def test_diplomacy_messages_are_visible_to_involved_factions(self) -> None:
+        ada = build_agent("ada", "red", 1, 1)
+        bo = build_agent("bo", "blue", 2, 1)
+        suri = build_agent("suri", "gold", 3, 1)
+        scripted = ScriptedLLMAdapter(
+            {
+                "ada": [
+                    DecisionPayload(
+                        action="FORM_ALLIANCE",
+                        target_x=2,
+                        target_y=1,
+                        reason="Trade would benefit us both.",
+                        updated_emotions=ada.emotions,
+                        updated_needs=ada.needs,
+                        thought="We should talk before the next march.",
+                        outbound_message=OutboundMessage(
+                            scope="diplomacy",
+                            target_faction_id="blue",
+                            text="Blue faction, let's open talks near the river."
+                        ),
+                    )
+                ],
+                "bo": [
+                    DecisionPayload(
+                        action="MOVE_WEST",
+                        target_x=1,
+                        target_y=1,
+                        reason="I am approaching the discussion.",
+                        updated_emotions=bo.emotions,
+                        updated_needs=bo.needs,
+                        thought="I should hear them out.",
+                    )
+                ],
+                "suri": [
+                    DecisionPayload(
+                        action="MOVE_WEST",
+                        target_x=2,
+                        target_y=1,
+                        reason="I am scouting quietly.",
+                        updated_emotions=suri.emotions,
+                        updated_needs=suri.needs,
+                        thought="Watching from a distance.",
+                    )
+                ],
+            }
+        )
+        simulation = build_simulation(agents=[ada, bo, suri], adapter=scripted)
+        simulation.step()
+        red_messages = simulation._recent_messages_for_agent(simulation.world.agents["ada"])
+        blue_messages = simulation._recent_messages_for_agent(simulation.world.agents["bo"])
+        gold_messages = simulation._recent_messages_for_agent(simulation.world.agents["suri"])
+        self.assertTrue(red_messages["diplomacy"])
+        self.assertTrue(blue_messages["diplomacy"])
+        self.assertFalse(gold_messages["diplomacy"])
 
 
 if __name__ == "__main__":

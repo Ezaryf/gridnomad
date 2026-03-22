@@ -81,3 +81,45 @@
   image-rendering: pixelated;
   image-rendering: crisp-edges;
 }
+
+.atlas-command-shell {
+  position: relative;
+  isolation: isolate;
+}
+
+.atlas-command-shell::before {
+  content: "";
+  position: absolute;
+  inset: 1px;
+  border-radius: 2rem;
+  background:
+    radial-gradient(circle at top left, rgba(255, 255, 255, 0.08), transparent 24%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.025), rgba(255, 255, 255, 0.01));
+  opacity: 0.95;
+  z-index: -1;
+}
+
+.atlas-command-shell::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent 28%),
+    radial-gradient(circle at top right, rgba(255, 255, 255, 0.05), transparent 20%);
+  opacity: 0.28;
+  mix-blend-mode: screen;
+  pointer-events: none;
+  z-index: -1;
+}
+
+.atlas-rail-shell {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.018)),
+    rgba(4, 4, 4, 0.96);
+}
+
+.atlas-stage-shell {
+  background:
+    radial-gradient(circle at top, rgba(255, 255, 255, 0.05), transparent 18%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.008));
+}

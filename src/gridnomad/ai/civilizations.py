@@ -12,6 +12,9 @@ from gridnomad.ai.adapters import AgentContext, HeuristicLLMAdapter, LLMAdapter
 
 
 ANSI_PATTERN = re.compile(r"\x1b\[[0-9;]*m")
+DEFAULT_OPENAI_MODEL = "gpt-5-mini"
+DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-5"
+DEFAULT_GEMINI_API_MODEL = "gemini-2.5-flash"
 
 
 def _clean_cli_output(output: str) -> str:
@@ -64,6 +67,9 @@ class CivilizationProviderConfig:
     cli_home: str | None = None
     timeout_seconds: int = 120
     base_url: str | None = None
+    available_models: list[str] = field(default_factory=list)
+    supports_model_listing: bool = False
+    supports_manual_model_entry: bool = False
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "CivilizationProviderConfig":
@@ -79,6 +85,9 @@ class CivilizationProviderConfig:
             cli_home=data.get("cliHome") or data.get("cli_home"),
             timeout_seconds=int(data.get("timeoutSeconds", data.get("timeout_seconds", 120))),
             base_url=data.get("baseUrl") or data.get("base_url"),
+            available_models=[str(item) for item in data.get("availableModels", data.get("available_models", []))],
+            supports_model_listing=bool(data.get("supportsModelListing", data.get("supports_model_listing", False))),
+            supports_manual_model_entry=bool(data.get("supportsManualModelEntry", data.get("supports_manual_model_entry", False))),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -94,6 +103,9 @@ class CivilizationProviderConfig:
             "cliHome": self.cli_home or "",
             "timeoutSeconds": self.timeout_seconds,
             "baseUrl": self.base_url or "",
+            "availableModels": list(self.available_models),
+            "supportsModelListing": self.supports_model_listing,
+            "supportsManualModelEntry": self.supports_manual_model_entry,
         }
 
 
@@ -104,10 +116,26 @@ class CivilizationSettings:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "CivilizationSettings":
         raw_factions = data.get("factions", {})
+        if raw_factions:
+            return cls(
+                factions={
+                    faction_id: CivilizationProviderConfig.from_dict(config)
+                    for faction_id, config in raw_factions.items()
+                }
+            )
+        groups = data.get("groups", [])
+        if groups:
+            return cls(
+                factions={
+                    str(group["id"]): CivilizationProviderConfig.from_dict(group.get("controller", {}))
+                    for group in groups
+                }
+            )
+        civilizations = data.get("civilizations", [])
         return cls(
             factions={
-                faction_id: CivilizationProviderConfig.from_dict(config)
-                for faction_id, config in raw_factions.items()
+                str(civilization["id"]): CivilizationProviderConfig.from_dict(civilization.get("controller", {}))
+                for civilization in civilizations
             }
         )
 
@@ -121,6 +149,89 @@ class CivilizationSettings:
 
     def to_dict(self) -> dict[str, Any]:
         return {"factions": {faction_id: config.to_dict() for faction_id, config in self.factions.items()}}
+
+
+class OpenAIAPIAdapter:
+    def __init__(self, config: CivilizationProviderConfig) -> None:
+        self.config = config
+
+    def decide(self, agent_context: AgentContext) -> str:
+        if not self.config.api_key:
+            raise RuntimeError("OpenAI API key is missing.")
+        try:
+            from openai import OpenAI
+        except ImportError as exc:
+            raise RuntimeError("OpenAI SDK is not installed.") from exc
+
+        client = OpenAI(
+            api_key=self.config.api_key,
+            base_url=self.config.base_url or None,
+            timeout=self.config.timeout_seconds,
+        )
+        response = client.responses.create(
+            model=self.config.model or DEFAULT_OPENAI_MODEL,
+            input=agent_context.prompt,
+        )
+        output = getattr(response, "output_text", "") or ""
+        if not output:
+            raise RuntimeError("OpenAI API returned no output.")
+        return _clean_cli_output(output)
+
+
+class AnthropicAPIAdapter:
+    def __init__(self, config: CivilizationProviderConfig) -> None:
+        self.config = config
+
+    def decide(self, agent_context: AgentContext) -> str:
+        if not self.config.api_key:
+            raise RuntimeError("Anthropic API key is missing.")
+        try:
+            import anthropic
+        except ImportError as exc:
+            raise RuntimeError("Anthropic SDK is not installed.") from exc
+
+        client = anthropic.Anthropic(
+            api_key=self.config.api_key,
+            base_url=self.config.base_url or None,
+            timeout=self.config.timeout_seconds,
+        )
+        response = client.messages.create(
+            model=self.config.model or DEFAULT_ANTHROPIC_MODEL,
+            max_tokens=2048,
+            messages=[{"role": "user", "content": agent_context.prompt}],
+        )
+        output = "\n".join(
+            block.text
+            for block in getattr(response, "content", [])
+            if getattr(block, "type", "") == "text" and getattr(block, "text", "").strip()
+        ).strip()
+        if not output:
+            raise RuntimeError("Anthropic API returned no output.")
+        return _clean_cli_output(output)
+
+
+class GeminiAPIAdapter:
+    def __init__(self, config: CivilizationProviderConfig) -> None:
+        self.config = config
+
+    def decide(self, agent_context: AgentContext) -> str:
+        api_key = self.config.api_key or self.config.google_api_key
+        if not api_key:
+            raise RuntimeError("Gemini API key is missing.")
+        try:
+            from google import genai
+        except ImportError as exc:
+            raise RuntimeError("Google GenAI SDK is not installed.") from exc
+
+        client = genai.Client(api_key=api_key)
+        response = client.models.generate_content(
+            model=self.config.model or DEFAULT_GEMINI_API_MODEL,
+            contents=agent_context.prompt,
+        )
+        output = getattr(response, "text", "") or ""
+        if not output:
+            raise RuntimeError("Gemini API returned no output.")
+        return _clean_cli_output(output)
 
 
 class GeminiCLIAdapter:
@@ -163,13 +274,18 @@ class OpenCodeCLIAdapter:
 
     def decide(self, agent_context: AgentContext) -> str:
         command = ["opencode", "run", "--dir", str(self.project_dir)]
+        if self.config.opencode_provider:
+            command.extend(["--provider", self.config.opencode_provider])
         if self.config.model:
             command.extend(["-m", self.config.model])
         command.append(agent_context.prompt)
         completed = subprocess.run(
             command,
             cwd=self.project_dir,
-            env=build_cli_environment(self.config.cli_home),
+            env=build_cli_environment(
+                self.config.cli_home,
+                {"OPENCODE_PROVIDER": self.config.opencode_provider or ""},
+            ),
             capture_output=True,
             text=True,
             timeout=self.config.timeout_seconds,
@@ -187,6 +303,7 @@ class RoutingLLMAdapter:
         self.project_dir = Path(project_dir or Path.cwd()).resolve()
         self.heuristic = HeuristicLLMAdapter()
         self._cache: dict[tuple[str, str, str, str], Any] = {}
+        self._runtime_messages: list[dict[str, str]] = []
 
     @classmethod
     def from_path(cls, path: str | Path, *, project_dir: Path | None = None) -> "RoutingLLMAdapter":
@@ -199,7 +316,15 @@ class RoutingLLMAdapter:
         adapter = self._adapter_for(config)
         try:
             return adapter.decide(agent_context)
-        except (subprocess.SubprocessError, FileNotFoundError, RuntimeError) as exc:
+        except Exception as exc:
+            self._runtime_messages.append(
+                {
+                    "faction_id": agent_context.agent.faction_id,
+                    "provider": config.provider,
+                    "model": config.model or "",
+                    "message": str(exc),
+                }
+            )
             fallback = self.heuristic.decide(agent_context)
             fallback.reason = f"Provider fallback after {config.provider} error: {exc}"
             fallback.thought = f"{fallback.thought} Provider fallback engaged."
@@ -216,9 +341,36 @@ class RoutingLLMAdapter:
             return self._cache[cache_key]
         if config.provider == "gemini-cli":
             adapter = GeminiCLIAdapter(config, project_dir=self.project_dir)
+        elif config.provider == "gemini-api":
+            adapter = GeminiAPIAdapter(config)
+        elif config.provider == "openai":
+            adapter = OpenAIAPIAdapter(config)
+        elif config.provider == "anthropic":
+            adapter = AnthropicAPIAdapter(config)
         elif config.provider == "opencode":
             adapter = OpenCodeCLIAdapter(config, project_dir=self.project_dir)
         else:
             adapter = self.heuristic
         self._cache[cache_key] = adapter
         return adapter
+
+    def describe_controllers(self, factions: dict[str, Any]) -> list[dict[str, str]]:
+        summaries: list[dict[str, str]] = []
+        for faction_id in sorted(factions):
+            faction = factions[faction_id]
+            config = self.settings.for_faction(faction_id)
+            summaries.append(
+                {
+                    "faction_id": faction_id,
+                    "group_name": getattr(faction, "name", faction_id),
+                    "provider": config.provider,
+                    "model": config.model or "",
+                    "credential": config.opencode_provider or "",
+                }
+            )
+        return summaries
+
+    def consume_runtime_messages(self) -> list[dict[str, str]]:
+        messages = list(self._runtime_messages)
+        self._runtime_messages.clear()
+        return messages

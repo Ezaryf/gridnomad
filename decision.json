@@ -1,0 +1,28 @@
+{
+  "action": "MOVE_NORTH",
+  "target_x": null,
+  "target_y": null,
+  "reason": "Exploring the northern coast area to assess bridge opportunities and expand my knowledge of the terrain.",
+  "updated_emotions": {
+    "Joy": 5,
+    "Sadness": 1,
+    "Fear": 1,
+    "Anger": 0,
+    "Disgust": 0,
+    "Surprise": 5
+  },
+  "updated_needs": {
+    "Survival": 3,
+    "Safety": 4,
+    "Belonging": 3,
+    "Esteem": 5,
+    "Self_Actualization": 7
+  },
+  "thought": "The coast calls to me - I must see what lies beyond and perhaps find a crossing point.",
+  "outbound_message": {
+    "scope": "civilization",
+    "target_faction_id": null,
+    "target_agent_id": null,
+    "text": "Moving north to explore the coast. Will report on bridge feasibility."
+  }
+}

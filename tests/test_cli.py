@@ -85,6 +85,47 @@ class CLITests(unittest.TestCase):
         self.assertIn("sprite_key", payload["world"]["settlements"][0])
         self.assertIn("footprint", payload["world"]["settlements"][0])
 
+    def test_run_stream_emits_live_messages_and_artifacts(self) -> None:
+        scenario = ROOT / "scenarios" / "river_fork.json"
+        scratch_root = ROOT / ".tmp-test-artifacts"
+        run_dir = scratch_root / f"stream-{uuid.uuid4().hex}"
+        scratch_root.mkdir(exist_ok=True)
+        run_dir.mkdir(parents=True, exist_ok=False)
+        try:
+            command = [
+                sys.executable,
+                "-m",
+                "gridnomad",
+                "run-stream",
+                "--scenario",
+                str(scenario),
+                "--ticks",
+                "2",
+                "--seed",
+                "33",
+                "--out",
+                str(run_dir),
+            ]
+            result = subprocess.run(command, cwd=ROOT, capture_output=True, text=True, check=False)
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+            messages = [
+                json.loads(line)
+                for line in result.stdout.splitlines()
+                if line.strip()
+            ]
+            types = [message["type"] for message in messages]
+            self.assertIn("run_started", types)
+            self.assertIn("snapshot", types)
+            self.assertIn("status", types)
+            self.assertIn("complete", types)
+            run_started = next(message for message in messages if message["type"] == "run_started")
+            self.assertIn("controllers", run_started)
+            self.assertTrue((run_dir / "events.jsonl").exists())
+            self.assertTrue((run_dir / "snapshot-0000.json").exists())
+            self.assertTrue((run_dir / "snapshot-0002.json").exists())
+        finally:
+            shutil.rmtree(scratch_root, ignore_errors=True)
+
 
 if __name__ == "__main__":
     unittest.main()

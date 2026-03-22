@@ -1,0 +1,113 @@
+from __future__ import annotations
+
+import unittest
+from unittest.mock import patch
+
+from helpers import build_agent, build_world
+from gridnomad.ai.adapters import build_agent_context
+from gridnomad.ai.civilizations import (
+    AnthropicAPIAdapter,
+    CivilizationProviderConfig,
+    CivilizationSettings,
+    GeminiAPIAdapter,
+    OpenAIAPIAdapter,
+    OpenCodeCLIAdapter,
+    RoutingLLMAdapter,
+)
+from gridnomad.core.perception import build_perception
+
+
+class ExplodingAdapter:
+    def decide(self, agent_context):
+        raise RuntimeError("provider exploded")
+
+
+class ProviderRoutingTests(unittest.TestCase):
+    def test_civilization_settings_parses_direct_api_groups(self) -> None:
+        settings = CivilizationSettings.from_dict(
+            {
+                "groups": [
+                    {"id": "red", "controller": {"provider": "openai", "model": "gpt-5-mini", "apiKey": "sk-openai"}},
+                    {"id": "blue", "controller": {"provider": "anthropic", "model": "claude-sonnet-4-5", "apiKey": "sk-anthropic"}},
+                    {"id": "gold", "controller": {"provider": "gemini-api", "model": "gemini-2.5-flash", "apiKey": "sk-gemini"}},
+                ]
+            }
+        )
+        self.assertEqual(settings.for_faction("red").provider, "openai")
+        self.assertEqual(settings.for_faction("blue").provider, "anthropic")
+        self.assertEqual(settings.for_faction("gold").provider, "gemini-api")
+
+    def test_routing_adapter_builds_direct_provider_adapters(self) -> None:
+        adapter = RoutingLLMAdapter(CivilizationSettings())
+        self.assertIsInstance(adapter._adapter_for(CivilizationProviderConfig(provider="openai")), OpenAIAPIAdapter)
+        self.assertIsInstance(adapter._adapter_for(CivilizationProviderConfig(provider="anthropic")), AnthropicAPIAdapter)
+        self.assertIsInstance(adapter._adapter_for(CivilizationProviderConfig(provider="gemini-api")), GeminiAPIAdapter)
+
+    def test_routing_adapter_records_provider_fallback_messages(self) -> None:
+        agent = build_agent("ada", "red", 1, 1)
+        _, world, _ = build_world(agents=[agent])
+        perception = build_perception(world, agent, 2)
+        context = build_agent_context(
+            tick=0,
+            agent=agent,
+            world=world,
+            perception=perception,
+            recent_events=[],
+            memories=[],
+            recent_messages={"civilization": [], "diplomacy": []},
+            cultural_context="",
+        )
+        adapter = RoutingLLMAdapter(
+            CivilizationSettings(
+                factions={"red": CivilizationProviderConfig(provider="openai", model="gpt-5-mini", api_key="sk-test")}
+            )
+        )
+        adapter._adapter_for = lambda config: ExplodingAdapter()  # type: ignore[method-assign]
+
+        decision = adapter.decide(context)
+        messages = adapter.consume_runtime_messages()
+
+        self.assertIn("Provider fallback after openai error", decision.reason)
+        self.assertEqual(messages[0]["provider"], "openai")
+        self.assertEqual(messages[0]["faction_id"], "red")
+        self.assertIn("provider exploded", messages[0]["message"])
+
+    def test_opencode_adapter_uses_selected_provider_and_model(self) -> None:
+        agent = build_agent("ada", "red", 1, 1)
+        _, world, _ = build_world(agents=[agent])
+        perception = build_perception(world, agent, 2)
+        context = build_agent_context(
+            tick=0,
+            agent=agent,
+            world=world,
+            perception=perception,
+            recent_events=[],
+            memories=[],
+            recent_messages={"civilization": [], "diplomacy": []},
+            cultural_context="",
+        )
+        adapter = OpenCodeCLIAdapter(
+            CivilizationProviderConfig(
+                provider="opencode",
+                model="opencode/minimax-m2.5-free",
+                opencode_provider="openrouter",
+            )
+        )
+
+        class Completed:
+            returncode = 0
+            stdout = '{"action":"MOVE_NORTH","target_x":null,"target_y":null,"reason":"test","updated_emotions":{"Joy":4,"Sadness":1,"Fear":1,"Anger":0,"Disgust":0,"Surprise":1},"updated_needs":{"Survival":4,"Safety":4,"Belonging":4,"Esteem":4,"Self_Actualization":4},"thought":"test"}'
+            stderr = ""
+
+        with patch("gridnomad.ai.civilizations.subprocess.run", return_value=Completed()) as mocked_run:
+            adapter.decide(context)
+
+        command = mocked_run.call_args.args[0]
+        self.assertIn("--provider", command)
+        self.assertIn("openrouter", command)
+        self.assertIn("-m", command)
+        self.assertIn("opencode/minimax-m2.5-free", command)
+
+
+if __name__ == "__main__":
+    unittest.main()

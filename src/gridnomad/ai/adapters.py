@@ -6,7 +6,15 @@ from typing import Protocol
 
 from gridnomad.ai.prompting import AgentPromptView, build_agent_prompt
 from gridnomad.core.actions import MODEL_ACTIONS, MOVE_DELTAS
-from gridnomad.core.models import ActionProposal, AgentState, DecisionPayload, Emotions, Needs, WorldState
+from gridnomad.core.models import (
+    ActionProposal,
+    AgentState,
+    DecisionPayload,
+    Emotions,
+    Needs,
+    OutboundMessage,
+    WorldState,
+)
 from gridnomad.core.perception import PerceptionSnapshot
 
 
@@ -18,6 +26,7 @@ class AgentContext:
     perception: PerceptionSnapshot
     recent_events: list[str]
     memories: list[str]
+    recent_messages: dict[str, list[str]]
     cultural_context: str
     prompt: str
 
@@ -38,16 +47,27 @@ class HeuristicLLMAdapter:
         target_x: int | None = None
         target_y: int | None = None
         reason = "I am keeping momentum and exploring nearby terrain."
+        outbound_message: OutboundMessage | None = None
 
         if perception.hostile_agents:
             hostile = agent_context.world.agents[perception.hostile_agents[0]]
             action = "ATTACK"
             target_x, target_y = hostile.x, hostile.y
             reason = f"{hostile.name} is close enough to threaten me, so I will strike first."
+            outbound_message = OutboundMessage(
+                scope="diplomacy",
+                target_faction_id=hostile.faction_id,
+                target_agent_id=hostile.id,
+                text=f"{hostile.name}, our borders are tense. Step back or we defend ourselves."
+            )
         elif agent.needs.survival >= 7 and perception.nearby_farmable:
             target_x, target_y = self._nearest_tile(agent, perception.nearby_farmable)
             action = "CULTIVATE"
             reason = "My survival need is urgent and this farmable ground can produce food."
+            outbound_message = OutboundMessage(
+                scope="civilization",
+                text="I am preparing farmland nearby. Bring tools or food if you can."
+            )
         elif perception.nearby_water and agent.inventory.wood >= 2 and "bridge" in agent_context.cultural_context.lower():
             adjacent_water = [
                 point
@@ -58,11 +78,20 @@ class HeuristicLLMAdapter:
             target_x, target_y = self._nearest_tile(agent, bridge_targets)
             action = "BUILD_BRIDGE"
             reason = "Our culture values crossing water, and I have enough wood to help."
+            outbound_message = OutboundMessage(
+                scope="civilization",
+                text="I found a good crossing point. Meet me here and we can open a new route."
+            )
         elif agent.needs.belonging >= 7 and perception.friendly_agents:
             friend = agent_context.world.agents[perception.friendly_agents[0]]
             action = "ASK_FOR_HELP"
             target_x, target_y = friend.x, friend.y
             reason = f"I feel isolated and want to reconnect with {friend.name}."
+            outbound_message = OutboundMessage(
+                scope="civilization",
+                target_agent_id=friend.id,
+                text=f"{friend.name}, I need support nearby. Can you move toward me?"
+            )
         else:
             move_names = list(MOVE_DELTAS)
             index = (sum(ord(char) for char in agent.id) + agent_context.tick + self.deterministic_offset) % len(
@@ -70,6 +99,11 @@ class HeuristicLLMAdapter:
             )
             action = move_names[index]
             reason = "I do not face an urgent conflict, so I am exploring a new direction."
+            if agent_context.tick % 4 == 0:
+                outbound_message = OutboundMessage(
+                    scope="civilization",
+                    text="I am scouting ahead and will report any useful terrain I find."
+                )
 
         updated_emotions = Emotions(
             joy=max(0, agent.emotions.joy - 1 + (1 if action in {"BUILD_BRIDGE", "FORM_ALLIANCE"} else 0)),
@@ -110,6 +144,7 @@ class HeuristicLLMAdapter:
             updated_needs=updated_needs,
             thought=thought,
             cultural_innovation=cultural_innovation,
+            outbound_message=outbound_message,
         )
 
     def _nearest_tile(self, agent: AgentState, points: list[tuple[int, int]]) -> tuple[int, int]:
@@ -139,10 +174,11 @@ def build_agent_context(
     perception: PerceptionSnapshot,
     recent_events: list[str],
     memories: list[str],
+    recent_messages: dict[str, list[str]],
     cultural_context: str,
 ) -> AgentContext:
     prompt_view = AgentPromptView.from_agent(agent, memories)
-    prompt = build_agent_prompt(prompt_view, perception.text, recent_events, cultural_context)
+    prompt = build_agent_prompt(prompt_view, perception.text, recent_events, recent_messages, cultural_context)
     return AgentContext(
         tick=tick,
         agent=agent,
@@ -150,6 +186,7 @@ def build_agent_context(
         perception=perception,
         recent_events=recent_events,
         memories=memories,
+        recent_messages=recent_messages,
         cultural_context=cultural_context,
         prompt=prompt,
     )

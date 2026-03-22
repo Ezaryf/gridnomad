@@ -17,12 +17,17 @@ class PromptAndValidationTests(unittest.TestCase):
             prompt_agent,
             "water tile 1 tile east; friendly agent Bo 1 tile south",
             ["shared food", "built bridge"],
+            {
+                "civilization": ["Ada to red council: I found a ford."],
+                "diplomacy": ["Bo to red: We can trade at dawn."]
+            },
             "Norm 'River Pact' (75): help build bridges.",
         )
         self.assertIn("You are Ada", prompt)
         self.assertIn("River Pact", prompt)
         self.assertIn("shared food", prompt)
         self.assertIn("Built a bridge yesterday", prompt)
+        self.assertIn("I found a ford", prompt)
         self.assertIn("MOVE_NORTH / MOVE_SOUTH / MOVE_EAST / MOVE_WEST", prompt)
 
     def test_parse_decision_payload_clamps_state_values_and_captures_unknown_action(self) -> None:
@@ -47,7 +52,11 @@ class PromptAndValidationTests(unittest.TestCase):
                     "Esteem": 4,
                     "Self_Actualization": 2,
                 },
-                "thought": "Celebration feels right."
+                "thought": "Celebration feels right.",
+                "outbound_message": {
+                    "scope": "civilization",
+                    "text": "Celebrate with me."
+                }
             }
         )
         decision = parse_decision_payload(raw)
@@ -57,6 +66,7 @@ class PromptAndValidationTests(unittest.TestCase):
         self.assertEqual(decision.updated_needs.safety, 0)
         self.assertIsNotNone(decision.action_proposal)
         self.assertEqual(decision.action_proposal.name, "DANCE")
+        self.assertEqual(decision.outbound_message.text, "Celebrate with me.")
 
     def test_action_registry_returns_noop_for_unknown_action(self) -> None:
         agent = build_agent("ada", "red", 1, 1)

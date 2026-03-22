@@ -11,6 +11,7 @@ from gridnomad.core.culture import CultureStore
 from gridnomad.core.memory import MemoryStore
 from gridnomad.core.models import (
     AgentState,
+    CommunicationMessage,
     DecisionPayload,
     Emotions,
     EngineAction,
@@ -68,9 +69,10 @@ class Simulation:
             perception = build_perception(self.world, agent, self.config.perception_radius)
             recent_events = self.memory_store.recent_events(agent.id, limit=5)
             memories = self.memory_store.recent_thoughts(agent.id, limit=5)
-            salience = self.evaluate_salience(agent, perception, recent_events)
+            recent_messages = self._recent_messages_for_agent(agent)
+            salience = self.evaluate_salience(agent, perception, recent_events, recent_messages)
             if salience.should_reason:
-                decision = self._reason_for_agent(agent, perception, recent_events, memories)
+                decision = self._reason_for_agent(agent, perception, recent_events, memories, recent_messages)
             else:
                 decision = self._reuse_or_fallback_decision(agent)
             action = self.registry.resolve(decision, self.world, agent)
@@ -113,6 +115,19 @@ class Simulation:
                         metadata=decision.action_proposal.to_dict(),
                     )
                 )
+            message = self._emit_outbound_message(agent, action, decision)
+            if message is not None:
+                tick_events.append(
+                    self._event(
+                        kind="COMMUNICATION",
+                        description=self._describe_message(message),
+                        success=True,
+                        actor_id=agent.id,
+                        target_agent_id=message.target_agent_id,
+                        faction_id=agent.faction_id,
+                        metadata=message.to_dict(),
+                    )
+                )
 
         for event in tick_events:
             self._record_event(event)
@@ -124,8 +139,10 @@ class Simulation:
         agent: AgentState,
         perception: PerceptionSnapshot,
         recent_events: list[str],
+        recent_messages: dict[str, list[str]] | None = None,
     ) -> SalienceDecision:
         reasons: list[str] = []
+        message_context = recent_messages or {}
         if agent.needs.any_at_or_above(7):
             reasons.append("urgent_need")
         if perception.hostile_agents:
@@ -138,6 +155,8 @@ class Simulation:
             reasons.append("help_signal")
         if any("goal" in event.lower() and "complete" in event.lower() for event in recent_events):
             reasons.append("goal_completion")
+        if message_context.get("civilization") or message_context.get("diplomacy"):
+            reasons.append("new_message")
         if self.world.tick - agent.last_reasoned_tick >= self.config.reason_interval:
             reasons.append("reason_interval")
         return SalienceDecision(should_reason=bool(reasons), reasons=reasons)
@@ -162,6 +181,7 @@ class Simulation:
         perception: PerceptionSnapshot,
         recent_events: list[str],
         memories: list[str],
+        recent_messages: dict[str, list[str]],
     ) -> DecisionPayload:
         context = build_agent_context(
             self.world.tick,
@@ -170,6 +190,7 @@ class Simulation:
             perception,
             recent_events,
             memories,
+            recent_messages,
             self.culture_store.summarize(agent.faction_id),
         )
         raw = self.adapter.decide(context)
@@ -181,6 +202,73 @@ class Simulation:
         decision.updated_needs = Needs.from_dict(decision.updated_needs.to_dict(), clamp=True)
         agent.last_reasoned_tick = self.world.tick
         return decision
+
+    def _recent_messages_for_agent(self, agent: AgentState, limit: int = 5) -> dict[str, list[str]]:
+        civilization: list[str] = []
+        diplomacy: list[str] = []
+        for message in reversed(self.world.communications):
+            if not message.visible_to_faction(agent.faction_id):
+                continue
+            rendered = self._describe_message(message)
+            if message.scope == "civilization":
+                civilization.append(rendered)
+            else:
+                diplomacy.append(rendered)
+            if len(civilization) >= limit and len(diplomacy) >= limit:
+                break
+        civilization.reverse()
+        diplomacy.reverse()
+        return {
+            "civilization": civilization[-limit:],
+            "diplomacy": diplomacy[-limit:],
+        }
+
+    def _emit_outbound_message(
+        self,
+        agent: AgentState,
+        action: EngineAction,
+        decision: DecisionPayload,
+    ) -> CommunicationMessage | None:
+        outbound = decision.outbound_message
+        if outbound is None or not outbound.text.strip():
+            return None
+        target_faction_id = outbound.target_faction_id
+        target_agent_id = outbound.target_agent_id
+        if outbound.scope == "diplomacy":
+            if target_faction_id is None:
+                if action.target_faction_id:
+                    target_faction_id = action.target_faction_id
+                elif action.target_agent_id:
+                    target = self.world.agents.get(action.target_agent_id)
+                    target_faction_id = None if target is None else target.faction_id
+            if target_faction_id is None or target_faction_id == agent.faction_id:
+                return None
+        else:
+            target_faction_id = agent.faction_id
+            if target_agent_id and self.world.agents.get(target_agent_id) is None:
+                target_agent_id = None
+
+        message = CommunicationMessage(
+            tick=self.world.tick,
+            scope=outbound.scope,
+            sender_agent_id=agent.id,
+            sender_faction_id=agent.faction_id,
+            target_faction_id=target_faction_id,
+            target_agent_id=target_agent_id,
+            text=outbound.text.strip(),
+        )
+        self.world.communications.append(message)
+        if len(self.world.communications) > 240:
+            self.world.communications = self.world.communications[-240:]
+        return message
+
+    def _describe_message(self, message: CommunicationMessage) -> str:
+        sender = self.world.agents.get(message.sender_agent_id)
+        sender_name = sender.name if sender is not None else message.sender_agent_id
+        if message.scope == "civilization":
+            return f"{sender_name} to {message.sender_faction_id} council: {message.text}"
+        target = message.target_faction_id or "unknown faction"
+        return f"{sender_name} to {target}: {message.text}"
 
     def _reuse_or_fallback_decision(self, agent: AgentState) -> DecisionPayload:
         if agent.last_intent and self.registry.is_known(agent.last_intent.action):
@@ -657,6 +745,13 @@ class Simulation:
             target = self.world.agents.get(event.target_agent_id)
             if target is not None:
                 self.culture_store.observe_outcome(target.faction_id, event.description, event.success)
+        if event.kind == "COMMUNICATION":
+            target_faction_id = event.metadata.get("target_faction_id") if isinstance(event.metadata, dict) else None
+            for agent in self.world.agents.values():
+                if not agent.alive:
+                    continue
+                if agent.faction_id == event.faction_id or agent.faction_id == target_faction_id:
+                    self.memory_store.add_event(agent.id, event.description)
 
     def _event(
         self,

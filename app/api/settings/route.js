@@ -1,11 +1,14 @@
 import { NextResponse } from "next/server";
 
 import { buildScenarioPreview, readScenario, readSettings, writeSettings } from "@/lib/gridnomad-store";
+import { synthesizeScenario } from "@/lib/civilization-setup";
 
 
 export async function GET() {
-  const [scenario, settings] = await Promise.all([readScenario(), readSettings()]);
+  const [templateScenario, settings] = await Promise.all([readScenario(), readSettings()]);
+  const scenario = synthesizeScenario(templateScenario, settings);
   return NextResponse.json({
+    templateScenario,
     scenario,
     preview: scenario.generator ? null : buildScenarioPreview(scenario),
     settings
@@ -16,5 +19,10 @@ export async function GET() {
 export async function POST(request) {
   const payload = await request.json();
   const settings = await writeSettings(payload);
-  return NextResponse.json({ settings });
+  const templateScenario = await readScenario();
+  return NextResponse.json({
+    settings,
+    templateScenario,
+    scenario: synthesizeScenario(templateScenario, settings)
+  });
 }

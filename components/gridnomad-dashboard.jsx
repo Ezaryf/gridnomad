@@ -1,15 +1,42 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { Radar, Waves } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  Bot,
+  Copy,
+  Play,
+  Plus,
+  Radar,
+  RefreshCcw,
+  Settings2,
+  Sparkles,
+  Trash2,
+  UsersRound
+} from "lucide-react";
 
 import AtlasMetrics from "@/components/atlas-metrics";
 import CivilizationSettingsSheet from "@/components/civilization-settings-sheet";
 import InspectorTabs from "@/components/inspector-tabs";
 import PixelWorldMap from "@/components/pixel-world-map";
-import WorldToolbar from "@/components/world-toolbar";
+import SimulationConsole from "@/components/simulation-console";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  PROVIDER_OPTIONS,
+  addGroup,
+  normalizeSettings,
+  providerDisplayName,
+  synthesizeScenario,
+  updateGroup,
+  updateGroupController,
+  updateGroupPopulation,
+  updateHumanBlueprint,
+  removeGroup
+} from "@/lib/civilization-setup";
 
 
 const PRESET_OPTIONS = [
@@ -18,86 +45,184 @@ const PRESET_OPTIONS = [
   { value: "highland-realms", label: "Highland Realms" }
 ];
 
+const SIZE_OPTIONS = [64, 96, 128, 160];
 
-const SIZE_OPTIONS = [
-  { value: 96, label: "96 x 96" },
-  { value: 128, label: "128 x 128" },
-  { value: 160, label: "160 x 160" }
-];
+const INITIAL_OVERLAYS = {
+  territories: true,
+  roads: true,
+  resources: false,
+  humans: true
+};
 
 
 export default function GridNomadDashboard() {
-  const [scenario, setScenario] = useState(null);
-  const [settings, setSettings] = useState({ world: {}, factions: {} });
-  const [fallbackPreview, setFallbackPreview] = useState(null);
-  const [generatedPayload, setGeneratedPayload] = useState(null);
-  const [snapshot, setSnapshot] = useState(null);
+  const [templateScenario, setTemplateScenario] = useState(null);
+  const [settings, setSettings] = useState({ world: {}, groups: [] });
+  const [world, setWorld] = useState(null);
+  const [ticks, setTicks] = useState(40);
   const [events, setEvents] = useState([]);
-  const [hoveredTile, setHoveredTile] = useState(null);
-  const [selectedTile, setSelectedTile] = useState(null);
-  const [opencodeModels, setOpencodeModels] = useState({});
+  const [statusItems, setStatusItems] = useState([]);
+  const [debugLines, setDebugLines] = useState([]);
+  const [statusMessage, setStatusMessage] = useState("Generate a seeded world, then run the live population stream.");
+  const [providerCatalogs, setProviderCatalogs] = useState({});
   const [opencodeCredentials, setOpencodeCredentials] = useState([]);
-  const [statusMessage, setStatusMessage] = useState("Booting the OLED atlas...");
-  const [ticks, setTicks] = useState(18);
-  const [loadingWorld, setLoadingWorld] = useState(false);
-  const [runningSimulation, setRunningSimulation] = useState(false);
-  const [savingSettings, setSavingSettings] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [settingsTab, setSettingsTab] = useState("world");
-  const [overlays, setOverlays] = useState({
-    territories: true,
-    roads: true,
-    resources: false,
-    agents: true
-  });
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const [sheetTab, setSheetTab] = useState("groups");
+  const [selectedTile, setSelectedTile] = useState(null);
+  const [hoverTile, setHoverTile] = useState(null);
+  const [overlays, setOverlays] = useState(INITIAL_OVERLAYS);
+  const [loading, setLoading] = useState(true);
+  const [working, setWorking] = useState(false);
+  const [running, setRunning] = useState(false);
+  const [currentTick, setCurrentTick] = useState(0);
+  const abortRef = useRef(null);
+
+  const scenario = useMemo(() => {
+    if (!templateScenario) {
+      return null;
+    }
+    return synthesizeScenario(templateScenario, settings);
+  }, [templateScenario, settings]);
+
+  const focusedTile = selectedTile ?? hoverTile;
+  const inspector = useMemo(() => buildInspector(world, scenario, focusedTile), [world, scenario, focusedTile]);
+  const metrics = useMemo(() => buildMetrics(world), [world]);
+  const territoryLookup = useMemo(() => world?.territories ?? {}, [world]);
 
   useEffect(() => {
-    let cancelled = false;
-    async function bootstrap() {
-      try {
-        const [settingsResponse, statusResponse] = await Promise.all([
-          fetch("/api/settings"),
-          fetch("/api/providers/opencode/status")
-        ]);
-        const settingsPayload = await settingsResponse.json();
-        const statusPayload = await statusResponse.json();
-        if (cancelled) {
-          return;
-        }
-        setScenario(settingsPayload.scenario);
-        setFallbackPreview(settingsPayload.preview);
-        setSettings(settingsPayload.settings);
-        setOpencodeCredentials(statusPayload.credentials ?? []);
-        await requestGeneratedWorld(settingsPayload.settings, {
-          nextStatus: "Atlas ready. Generate the world or run the current civilizations."
-        });
-      } catch (error) {
-        if (!cancelled) {
-          setStatusMessage(`GridNomad could not finish booting: ${error.message}`);
-        }
-      }
-    }
-    bootstrap();
-    return () => {
-      cancelled = true;
-    };
+    void bootstrap();
+    return () => abortRef.current?.abort();
   }, []);
 
-  const activeWorld = snapshot?.world ?? generatedPayload?.world ?? fallbackPreview;
-  const activeTile = selectedTile ?? hoveredTile;
-  const inspector = useMemo(() => buildTileInsight(activeWorld, activeTile), [activeTile, activeWorld]);
-  const metrics = useMemo(() => buildMetrics(activeWorld, settings.world?.seed), [activeWorld, settings.world?.seed]);
-  const territorySummary = useMemo(
-    () => describeTerritory(activeWorld, inspector?.tile.owner_faction),
-    [activeWorld, inspector]
-  );
+  async function bootstrap() {
+    setLoading(true);
+    try {
+      const response = await fetch("/api/settings", { cache: "no-store" });
+      const payload = await response.json();
+      const normalized = normalizeSettings(payload.templateScenario, payload.settings);
+      setTemplateScenario(payload.templateScenario);
+      setSettings(normalized);
+      await Promise.all([
+        refreshOpencodeStatus(true),
+        refreshProviderCatalogs(normalized, true)
+      ]);
+      if (payload.preview) {
+        setWorld(payload.preview);
+      } else {
+        await generateWorld(normalized, true);
+      }
+      setStatusMessage("Project loaded. The map is ready for group edits or a live run.");
+    } catch (error) {
+      pushStatus("error", "Project bootstrap failed.");
+      pushDebug("bootstrap", String(error));
+      setStatusMessage("Project bootstrap failed. Check the debug console.");
+    } finally {
+      setLoading(false);
+    }
+  }
 
-  async function requestGeneratedWorld(nextSettings = settings, { nextStatus } = {}) {
-    setLoadingWorld(true);
-    setStatusMessage("Generating the world through the Python engine...");
-    setSnapshot(null);
-    setEvents([]);
-    setSelectedTile(null);
+  async function refreshOpencodeStatus(silent = false) {
+    try {
+      const response = await fetch("/api/providers/opencode/status", { cache: "no-store" });
+      const payload = await response.json();
+      setOpencodeCredentials(payload.credentials ?? []);
+      if (!silent) {
+        pushStatus("provider", `OpenCode credentials refreshed: ${(payload.credentials ?? []).length}.`);
+      }
+      if (payload.stderr) {
+        pushDebug("provider", payload.stderr);
+      }
+    } catch (error) {
+      if (!silent) {
+        pushStatus("error", "Could not refresh OpenCode credentials.");
+      }
+      pushDebug("provider", String(error));
+    }
+  }
+
+  async function refreshProviderCatalog(groupId, provider, credential = "", silent = false) {
+    try {
+      const params = new URLSearchParams({ provider });
+      if (credential) {
+        params.set("credential", credential);
+      }
+      const response = await fetch(`/api/providers/catalog?${params.toString()}`, { cache: "no-store" });
+      const payload = await response.json();
+      setProviderCatalogs((current) => ({ ...current, [groupId]: payload }));
+      if (templateScenario) {
+        setSettings((current) => updateGroupController(current, templateScenario, groupId, {
+          availableModels: payload.models ?? [],
+          supportsModelListing: Boolean(payload.supports_model_listing),
+          supportsManualModelEntry: Boolean(payload.supports_manual_model_entry)
+        }));
+      }
+      if (!silent) {
+        pushStatus("provider", payload.ok
+          ? `Loaded ${payload.models?.length ?? 0} models for ${providerDisplayName(provider)}.`
+          : `Could not load models for ${providerDisplayName(provider)}.`);
+      }
+      if (payload.stderr) {
+        pushDebug("provider", payload.stderr);
+      }
+    } catch (error) {
+      if (!silent) {
+        pushStatus("error", `Could not load the ${providerDisplayName(provider)} model catalog.`);
+      }
+      pushDebug("provider", String(error));
+    }
+  }
+
+  async function refreshProviderCatalogs(nextSettings, silent = false) {
+    for (const group of nextSettings.groups ?? []) {
+      const provider = group.controller?.provider ?? "heuristic";
+      if (provider === "heuristic") {
+        setProviderCatalogs((current) => ({
+          ...current,
+          [group.id]: {
+            ok: true,
+            provider,
+            models: [],
+            supports_model_listing: false,
+            supports_manual_model_entry: false,
+            auth_status: "local",
+            login_hint: "This group uses the local heuristic controller."
+          }
+        }));
+        continue;
+      }
+      await refreshProviderCatalog(group.id, provider, group.controller?.opencodeProvider ?? "", silent);
+    }
+  }
+
+  async function saveSettings(nextSettings = settings, silent = false) {
+    setWorking(true);
+    try {
+      const response = await fetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(nextSettings)
+      });
+      const payload = await response.json();
+      const normalized = normalizeSettings(payload.templateScenario, payload.settings);
+      setTemplateScenario(payload.templateScenario);
+      setSettings(normalized);
+      if (!silent) {
+        pushStatus("settings", "Project settings saved.");
+        setStatusMessage("Project settings saved.");
+      }
+      return normalized;
+    } catch (error) {
+      pushStatus("error", "Saving project settings failed.");
+      pushDebug("settings", String(error));
+      setStatusMessage("Saving settings failed.");
+      return null;
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  async function generateWorld(nextSettings = settings, silent = false) {
+    setWorking(true);
     try {
       const response = await fetch("/api/worlds/generate", {
         method: "POST",
@@ -106,316 +231,747 @@ export default function GridNomadDashboard() {
       });
       const payload = await response.json();
       if (!response.ok || !payload.ok) {
-        setStatusMessage(`World generation failed. ${payload.stderr || payload.stdout || "Unknown error."}`);
-        return;
+        throw new Error(payload.stderr || payload.stdout || "World generation failed.");
       }
-      setSettings(nextSettings);
-      setGeneratedPayload(payload);
-      setStatusMessage(
-        nextStatus ?? `Generated world ${payload.world.width} x ${payload.world.height} from seed ${payload.world.seed}.`
-      );
+      setWorld(payload.world);
+      setCurrentTick(payload.world?.tick ?? 0);
+      if (!silent) {
+        pushStatus("generation", `Generated world ${payload.world?.seed}.`);
+        setStatusMessage(`Generated ${payload.world?.width} x ${payload.world?.height} world from seed ${payload.world?.seed}.`);
+      }
+      return payload.world;
+    } catch (error) {
+      pushStatus("error", "World generation failed.");
+      pushDebug("generation", String(error));
+      setStatusMessage("World generation failed. Check the debug console.");
+      return null;
     } finally {
-      setLoadingWorld(false);
+      setWorking(false);
     }
   }
 
-  async function saveSettings(nextSettings = settings, { message = "Settings saved." } = {}) {
-    setSavingSettings(true);
+  async function runSimulationLive() {
+    if (running) {
+      return;
+    }
+    setRunning(true);
+    setEvents([]);
+    setStatusItems([]);
+    setDebugLines([]);
+    setCurrentTick(0);
+    setStatusMessage("Starting the live stream...");
+
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     try {
-      const response = await fetch("/api/settings", {
+      const response = await fetch("/api/simulations/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(nextSettings)
+        body: JSON.stringify({ ticks, settings }),
+        signal: controller.signal
       });
-      const payload = await response.json();
-      setSettings(payload.settings);
-      setStatusMessage(message);
-      return payload.settings;
+      if (!response.ok || !response.body) {
+        const text = await response.text().catch(() => "");
+        throw new Error(text || `Simulation stream failed with status ${response.status}.`);
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+          break;
+        }
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split(/\r?\n/);
+        buffer = lines.pop() ?? "";
+        for (const line of lines) {
+          handleStreamLine(line);
+        }
+      }
+
+      if (buffer.trim()) {
+        handleStreamLine(buffer);
+      }
+    } catch (error) {
+      if (error?.name !== "AbortError") {
+        pushStatus("error", "The live simulation stream failed.");
+        pushDebug("stream", String(error));
+        setStatusMessage("The live simulation stream failed.");
+      }
     } finally {
-      setSavingSettings(false);
+      abortRef.current = null;
+      setRunning(false);
     }
   }
 
-  function updateFaction(factionId, patch) {
+  function handleStreamLine(line) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      return;
+    }
+    let payload;
+    try {
+      payload = JSON.parse(trimmed);
+    } catch (error) {
+      pushDebug("stream", `Non-JSON line: ${trimmed}`);
+      pushDebug("stream", String(error));
+      return;
+    }
+
+    if (payload.type === "snapshot" && payload.snapshot?.world) {
+      setWorld(payload.snapshot.world);
+      setCurrentTick(payload.tick ?? payload.snapshot.world.tick ?? 0);
+      return;
+    }
+    if (payload.type === "event" && payload.event) {
+      setEvents((current) => [...current, payload.event]);
+      return;
+    }
+    if (payload.type === "status") {
+      setCurrentTick(payload.tick ?? 0);
+      pushStatus("status", payload.message ?? "Tick complete.", payload.tick);
+      setStatusMessage(payload.message ?? "Tick complete.");
+      return;
+    }
+    if (payload.type === "run_started") {
+      pushStatus("run_started", `Live run started for ${payload.ticks} ticks.`, 0);
+      for (const controller of payload.controllers ?? []) {
+        pushStatus(
+          "controller",
+          `${controller.group_name}: ${providerDisplayName(controller.provider)}${controller.model ? ` (${controller.model})` : ""}`,
+          0
+        );
+      }
+      setStatusMessage(`Streaming the run live for ${payload.ticks} ticks.`);
+      return;
+    }
+    if (payload.type === "provider_status") {
+      const providerSummary = `${providerDisplayName(payload.provider)}${payload.model ? ` (${payload.model})` : ""}`;
+      pushStatus(
+        "provider",
+        `${payload.faction_id}: ${providerSummary} fallback triggered. ${payload.message ?? ""}`.trim(),
+        payload.tick
+      );
+      pushDebug(
+        "provider",
+        `${payload.faction_id}: ${providerSummary} -> ${payload.message ?? "Provider issue."}`.trim(),
+        payload.tick
+      );
+      return;
+    }
+    if (payload.type === "stderr") {
+      pushDebug("stderr", payload.text ?? payload.message ?? "", payload.tick);
+      return;
+    }
+    if (payload.type === "complete") {
+      if (payload.snapshot?.world) {
+        setWorld(payload.snapshot.world);
+      }
+      pushStatus("complete", `Run complete. ${payload.event_count ?? 0} events recorded.`, payload.tick);
+      setStatusMessage(`Run complete at tick ${payload.tick}.`);
+      return;
+    }
+    if (payload.type === "error") {
+      pushStatus("error", payload.message ?? "Simulation error.", payload.tick);
+      pushDebug("error", payload.message ?? "Simulation error.", payload.tick);
+      setStatusMessage(payload.message ?? "Simulation error.");
+      return;
+    }
+
+    pushDebug("stream", trimmed);
+  }
+
+  function pushStatus(type, message, tick = null) {
+    setStatusItems((current) => [...current, { type, message, tick }]);
+  }
+
+  function pushDebug(type, message, tick = null) {
+    setDebugLines((current) => [...current, { type, message, tick }]);
+  }
+
+  function patchWorld(patch) {
     setSettings((current) => ({
       ...current,
-      factions: {
-        ...current.factions,
-        [factionId]: {
-          ...current.factions[factionId],
-          ...patch
-        }
-      }
+      world: { ...current.world, ...patch }
     }));
   }
 
-  function updateWorld(patch) {
-    setSettings((current) => ({
-      ...current,
-      world: {
-        ...current.world,
-        ...patch
-      }
-    }));
+  function patchGroup(groupId, patch) {
+    if (!templateScenario) {
+      return;
+    }
+    setSettings((current) => updateGroup(current, templateScenario, groupId, patch));
   }
 
-  async function refreshOpencodeModels(factionId) {
-    const provider = settings.factions[factionId]?.opencodeProvider;
-    const query = provider ? `?provider=${encodeURIComponent(provider)}` : "";
-    const response = await fetch(`/api/providers/opencode/models${query}`);
-    const payload = await response.json();
-    setOpencodeModels((current) => ({ ...current, [factionId]: payload.models ?? [] }));
-    setStatusMessage(
-      payload.models?.length
-        ? `Loaded ${payload.models.length} OpenCode models for ${factionLabel(scenario, factionId)}.`
-        : "OpenCode model list returned no entries. Check login state and CLI availability."
-    );
+  function patchGroupController(groupId, patch) {
+    if (!templateScenario) {
+      return;
+    }
+    setSettings((current) => updateGroupController(current, templateScenario, groupId, patch));
   }
 
-  async function refreshOpencodeStatus() {
-    const response = await fetch("/api/providers/opencode/status");
-    const payload = await response.json();
-    setOpencodeCredentials(payload.credentials ?? []);
-    setStatusMessage("OpenCode credential list refreshed.");
+  function patchPopulation(groupId, population) {
+    if (!templateScenario) {
+      return;
+    }
+    setSettings((current) => updateGroupPopulation(current, templateScenario, groupId, population));
+  }
+
+  function patchHuman(groupId, humanId, patch) {
+    setSettings((current) => updateHumanBlueprint(current, groupId, humanId, patch));
+  }
+
+  function addCommunityGroup() {
+    if (!templateScenario) {
+      return;
+    }
+    setSettings((current) => addGroup(current, templateScenario));
+  }
+
+  function deleteCommunityGroup(groupId) {
+    if (!templateScenario) {
+      return;
+    }
+    setSettings((current) => removeGroup(current, templateScenario, groupId));
+  }
+
+  async function handleProviderChange(groupId, provider) {
+    patchGroupController(groupId, { provider, model: "" });
+    const group = settings.groups.find((item) => item.id === groupId);
+    if (provider !== "heuristic") {
+      await refreshProviderCatalog(groupId, provider, group?.controller?.opencodeProvider ?? "");
+    }
+  }
+
+  async function handleProviderCredentialChange(groupId, credential) {
+    patchGroupController(groupId, { opencodeProvider: credential });
+    await refreshProviderCatalog(groupId, "opencode", credential);
   }
 
   async function launchProviderLogin(provider) {
-    const route = provider === "opencode" ? "/api/providers/opencode/login" : "/api/providers/gemini/login";
-    const response = await fetch(route, { method: "POST" });
-    const payload = await response.json();
-    setStatusMessage(payload.message);
-  }
-
-  async function runSimulation() {
-    setRunningSimulation(true);
-    setStatusMessage("Running the current world through the simulator...");
     try {
-      const response = await fetch("/api/simulations/run", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ticks, settings })
-      });
+      const route = provider === "gemini-cli" ? "/api/providers/gemini/login" : "/api/providers/opencode/login";
+      const response = await fetch(route, { method: "POST" });
       const payload = await response.json();
-      if (!response.ok || !payload.ok) {
-        setStatusMessage(`Simulation run failed. ${payload.stderr || payload.stdout || "Unknown error."}`);
-        return;
-      }
-      setSnapshot(payload.snapshot);
-      setEvents(payload.events ?? []);
-      setStatusMessage(`Simulation complete. Loaded ${payload.events?.length ?? 0} events from ${payload.runDir}.`);
-    } finally {
-      setRunningSimulation(false);
+      pushStatus("provider", payload.message ?? `${provider} login launched.`);
+      setStatusMessage(payload.message ?? `${provider} login launched.`);
+    } catch (error) {
+      pushStatus("error", `Could not launch ${provider} login.`);
+      pushDebug("provider", String(error));
     }
-  }
-
-  async function randomizeSeed() {
-    const nextSeed = Math.floor(Math.random() * 900000) + 100000;
-    const nextSettings = {
-      ...settings,
-      world: {
-        ...settings.world,
-        seed: nextSeed
-      }
-    };
-    setSettings(nextSettings);
-    await requestGeneratedWorld(nextSettings, {
-      nextStatus: `Generated a new world from seed ${nextSeed}.`
-    });
   }
 
   async function copySeed() {
-    const seed = settings.world?.seed;
-    if (!seed || typeof navigator === "undefined" || !navigator.clipboard) {
-      setStatusMessage("Clipboard access is unavailable in this environment.");
-      return;
+    try {
+      await navigator.clipboard.writeText(String(settings.world?.seed ?? ""));
+      pushStatus("clipboard", `Copied seed ${settings.world?.seed}.`);
+      setStatusMessage(`Seed ${settings.world?.seed} copied to clipboard.`);
+    } catch (error) {
+      pushDebug("clipboard", String(error));
+      setStatusMessage("Clipboard access is unavailable.");
     }
-    await navigator.clipboard.writeText(String(seed));
-    setStatusMessage(`Copied seed ${seed} to your clipboard.`);
   }
 
-  function openSettingsPanel(tab) {
-    setSettingsTab(tab);
-    setSettingsOpen(true);
+  function randomizeSeed() {
+    patchWorld({ seed: Math.floor(Math.random() * 900000) + 100000 });
   }
 
-  const busy = loadingWorld || runningSimulation || savingSettings;
+  function toggleOverlay(key) {
+    setOverlays((current) => ({ ...current, [key]: !current[key] }));
+  }
+
+  const busy = loading || working || running;
 
   return (
-    <main className="min-h-screen bg-background text-foreground">
-      <div className="mx-auto flex w-full max-w-[1900px] flex-col gap-4 px-4 py-4 sm:px-6 sm:py-6">
-        <WorldToolbar
-          worldSettings={settings.world ?? {}}
-          ticks={ticks}
-          presetOptions={PRESET_OPTIONS}
-          sizeOptions={SIZE_OPTIONS}
-          statusMessage={statusMessage}
-          overlays={overlays}
+    <div className="min-h-screen bg-black px-4 py-4 text-zinc-100 sm:px-5 lg:px-6">
+      <div className="mx-auto grid min-h-[calc(100vh-2rem)] max-w-[1900px] gap-4 xl:grid-cols-[300px_minmax(0,1fr)_340px] xl:grid-rows-[auto_minmax(0,1fr)_320px]">
+        <GroupRail
+          groups={settings.groups ?? []}
           busy={busy}
-          onSeedChange={(value) => updateWorld({ seed: value })}
-          onPresetChange={(value) => updateWorld({ generatorPreset: value })}
-          onSizeChange={(value) => updateWorld({ width: value, height: value })}
-          onTicksChange={setTicks}
-          onToggleOverlay={(key) =>
-            setOverlays((current) => ({
-              ...current,
-              [key]: !current[key]
-            }))
-          }
-          onRandomizeSeed={randomizeSeed}
-          onCopySeed={copySeed}
-          onGenerateWorld={() => requestGeneratedWorld()}
-          onRunSimulation={runSimulation}
-          onOpenWorldSettings={() => openSettingsPanel("world")}
-          onOpenCivilizations={() => openSettingsPanel("civilizations")}
+          onAddGroup={addCommunityGroup}
+          onDeleteGroup={deleteCommunityGroup}
+          onUpdateGroup={patchGroup}
+          onUpdatePopulation={patchPopulation}
+          onProviderChange={handleProviderChange}
+          onOpenTab={(tab) => {
+            setSheetTab(tab);
+            setSheetOpen(true);
+          }}
+          className="atlas-rail-shell xl:row-span-3"
         />
 
-        <AtlasMetrics metrics={metrics} />
+        <CommandDeck
+          className="atlas-command-shell xl:col-start-2 xl:row-start-1"
+          worldSettings={settings.world ?? {}}
+          ticks={ticks}
+          overlays={overlays}
+          busy={busy}
+          statusMessage={statusMessage}
+          metrics={metrics}
+          onSeedChange={(seed) => patchWorld({ seed })}
+          onPresetChange={(generatorPreset) => patchWorld({ generatorPreset })}
+          onSizeChange={(size) => patchWorld({ width: size, height: size })}
+          onTicksChange={(value) => setTicks(clampTicks(value))}
+          onToggleOverlay={toggleOverlay}
+          onRandomizeSeed={randomizeSeed}
+          onCopySeed={copySeed}
+          onGenerateWorld={() => generateWorld()}
+          onRunSimulation={runSimulationLive}
+          onOpenSetup={() => {
+            setSheetTab("world");
+            setSheetOpen(true);
+          }}
+          onOpenControllers={() => {
+            setSheetTab("controllers");
+            setSheetOpen(true);
+          }}
+        />
 
-        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
-          <div className="space-y-4">
-            <Card className="overflow-hidden bg-[linear-gradient(180deg,rgba(255,255,255,0.03),rgba(255,255,255,0.015))]">
-              <CardHeader className="border-b border-white/8 pb-4">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2">
-                      <Badge>World stage</Badge>
-                      {snapshot ? <Badge variant="muted">Tick {snapshot.tick}</Badge> : <Badge variant="muted">Preview</Badge>}
-                    </div>
-                    <CardTitle className="text-xl">Illustrated seeded pixel atlas</CardTitle>
-                    <CardDescription>
-                      Procedural world data now renders as a layered sprite atlas with denser terrain, richer settlements, animated water, and cleaner exploration controls.
-                    </CardDescription>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <MapMeta icon={Waves} label={`${activeWorld?.roads?.length ?? 0} roads`} />
-                    <MapMeta icon={Radar} label={`${activeWorld?.settlements?.length ?? 0} settlements`} />
-                  </div>
+        <div className="xl:col-start-2 xl:row-start-2">
+          <Card className="atlas-stage-shell h-full overflow-hidden">
+            <CardHeader className="border-b border-white/8 pb-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <CardTitle className="text-lg">World stage</CardTitle>
+                  <CardDescription>
+                    Humans render as tiny moving swarms. The controller stays invisible while the population becomes the thing you watch.
+                  </CardDescription>
                 </div>
-              </CardHeader>
-              <CardContent className="p-3 sm:p-4">
-                <PixelWorldMap
-                  world={activeWorld}
-                  overlays={overlays}
-                  selectedTile={selectedTile}
-                  onHoverTile={setHoveredTile}
-                  onSelectTile={setSelectedTile}
-                />
-              </CardContent>
-            </Card>
-          </div>
+                <div className="flex flex-wrap gap-2">
+                  <Badge variant={running ? "solid" : "muted"}>{running ? "Streaming live" : "Standing by"}</Badge>
+                  <Badge variant="muted">Tick {currentTick}</Badge>
+                  <Badge variant="muted">{metrics.aliveHumans} humans</Badge>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="flex h-full min-h-[560px] flex-col gap-4 p-4">
+              <AtlasMetrics metrics={metrics} />
+              <div className="min-h-0 flex-1 overflow-hidden rounded-[28px] border border-white/8 bg-black/80">
+                {world ? (
+                  <PixelWorldMap
+                    world={world}
+                    overlays={overlays}
+                    selectedTile={selectedTile}
+                    onHoverTile={setHoverTile}
+                    onSelectTile={setSelectedTile}
+                  />
+                ) : (
+                  <div className="flex h-full items-center justify-center text-sm text-zinc-500">
+                    Generate a world to populate the map.
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
 
-          <InspectorTabs
-            scenario={scenario}
-            inspector={inspector}
+        <InspectorTabs
+          scenario={scenario}
+          inspector={inspector}
+          events={events}
+          communications={world?.communications ?? []}
+          territorySummary={buildTerritorySummary(world, inspector)}
+          className="atlas-rail-shell xl:col-start-3 xl:row-span-3"
+          panelHeightClass="h-[calc(100vh-18rem)] min-h-[640px]"
+        />
+
+        <div className="xl:col-start-2 xl:row-start-3">
+          <SimulationConsole
             events={events}
-            territorySummary={territorySummary}
+            statusItems={statusItems}
+            debugLines={debugLines}
+            running={running}
+            currentTick={currentTick}
           />
         </div>
       </div>
 
       <CivilizationSettingsSheet
-        open={settingsOpen}
-        onOpenChange={setSettingsOpen}
-        activeTab={settingsTab}
-        onTabChange={setSettingsTab}
-        scenario={scenario}
+        open={sheetOpen}
+        onOpenChange={setSheetOpen}
+        activeTab={sheetTab}
+        onTabChange={setSheetTab}
         settings={settings}
-        opencodeModels={opencodeModels}
+        providerCatalogs={providerCatalogs}
         opencodeCredentials={opencodeCredentials}
+        territoryLookup={territoryLookup}
         busy={busy}
-        onUpdateWorld={updateWorld}
-        onUpdateFaction={updateFaction}
-        onSaveSettings={() => saveSettings(settings)}
-        onGenerateWorld={() => requestGeneratedWorld()}
-        onRefreshOpencodeStatus={refreshOpencodeStatus}
-        onRefreshOpencodeModels={refreshOpencodeModels}
+        onUpdateWorld={patchWorld}
+        onAddGroup={addCommunityGroup}
+        onDeleteGroup={deleteCommunityGroup}
+        onUpdateGroup={patchGroup}
+        onUpdateController={patchGroupController}
+        onUpdatePopulation={patchPopulation}
+        onUpdateHuman={patchHuman}
+        onSaveSettings={() => saveSettings()}
+        onGenerateWorld={() => generateWorld()}
+        onRefreshOpencodeStatus={() => refreshOpencodeStatus()}
+        onRefreshProviderCatalog={(groupId, provider, credential) => refreshProviderCatalog(groupId, provider, credential)}
+        onProviderChange={handleProviderChange}
+        onProviderCredentialChange={handleProviderCredentialChange}
         onLaunchProviderLogin={launchProviderLogin}
       />
-    </main>
+    </div>
   );
 }
 
 
-function buildMetrics(world, fallbackSeed) {
-  if (!world) {
-    return {
-      aliveAgents: 0,
-      settlements: 0,
-      landmarks: 0,
-      seed: fallbackSeed ?? "..."
-    };
-  }
-  const agents = Object.values(world.agents ?? {});
-  const landmarks = (world.props ?? []).filter((prop) =>
-    ["lighthouse", "observatory", "palace", "market", "shrine"].includes(prop.kind)
-  ).length;
+function GroupRail({
+  groups,
+  busy,
+  onAddGroup,
+  onDeleteGroup,
+  onUpdateGroup,
+  onUpdatePopulation,
+  onProviderChange,
+  onOpenTab,
+  className
+}) {
+  return (
+    <Card className={`overflow-hidden ${className}`}>
+      <CardHeader className="border-b border-white/8 pb-4">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <CardTitle className="text-lg">Community groups</CardTitle>
+            <CardDescription>
+              Add or remove groups, set their human count, and choose the controller that powers them.
+            </CardDescription>
+          </div>
+          <Button variant="secondary" size="icon" onClick={onAddGroup} disabled={busy}>
+            <Plus className="size-4" />
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent className="flex h-full min-h-0 flex-col gap-4 p-4">
+        <div className="grid gap-3 sm:grid-cols-3 xl:grid-cols-1">
+          <MiniMetric icon={UsersRound} label="Groups" value={String(groups.length)} />
+          <MiniMetric icon={Radar} label="Humans" value={String(groups.reduce((sum, group) => sum + (group.population_count ?? 0), 0))} />
+          <MiniMetric icon={Bot} label="Providers" value={String(new Set(groups.map((group) => group.controller?.provider ?? "heuristic")).size)} />
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" onClick={() => onOpenTab("groups")}>
+            <Settings2 className="size-4" />
+            Full setup
+          </Button>
+          <Button variant="secondary" onClick={() => onOpenTab("humans")}>
+            <UsersRound className="size-4" />
+            Human roster
+          </Button>
+        </div>
+
+        <ScrollArea className="min-h-0 flex-1 pr-2">
+          <div className="space-y-4">
+            {groups.map((group, index) => (
+              <article key={group.id} className="rounded-[28px] border border-white/8 bg-black/55 p-4">
+                <div className="mb-4 flex items-start justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div className="size-10 rounded-2xl border border-white/10" style={{ backgroundColor: group.color }} />
+                    <div>
+                      <p className="text-[11px] uppercase tracking-[0.18em] text-zinc-500">Group {index + 1}</p>
+                      <p className="text-sm font-medium text-zinc-100">{group.id}</p>
+                    </div>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => onDeleteGroup(group.id)}
+                    disabled={busy || groups.length <= 1}
+                  >
+                    <Trash2 className="size-4" />
+                  </Button>
+                </div>
+
+                <div className="space-y-3">
+                  <Field label="Name">
+                    <Input value={group.name} onChange={(event) => onUpdateGroup(group.id, { name: event.target.value })} />
+                  </Field>
+                  <div className="rounded-2xl border border-white/8 bg-white/[0.03] px-3 py-3 text-xs leading-6 text-zinc-400">
+                    {providerDisplayName(group.controller?.provider ?? "heuristic")}
+                    {group.controller?.model ? ` · ${group.controller.model}` : ""}
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+                    <Field label="Population">
+                      <Input
+                        type="number"
+                        min="1"
+                        max="48"
+                        value={group.population_count}
+                        onChange={(event) => onUpdatePopulation(group.id, Number(event.target.value))}
+                      />
+                    </Field>
+                    <Field label="Controller">
+                      <Select value={group.controller?.provider ?? "heuristic"} onValueChange={(value) => onProviderChange(group.id, value)}>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {PROVIDER_OPTIONS.map((option) => (
+                            <SelectItem key={option.value} value={option.value}>
+                              {option.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </Field>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-[72px_minmax(0,1fr)] xl:grid-cols-1">
+                    <Field label="Color">
+                      <Input
+                        type="color"
+                        value={group.color}
+                        onChange={(event) => onUpdateGroup(group.id, { color: event.target.value })}
+                        className="h-10 p-1"
+                      />
+                    </Field>
+                    <Field label="Culture seed">
+                      <Input
+                        value={group.culture?.[0]?.element ?? ""}
+                        onChange={(event) => onUpdateGroup(group.id, {
+                          culture: [{ ...(group.culture?.[0] ?? {}), element: event.target.value }]
+                        })}
+                      />
+                    </Field>
+                  </div>
+                </div>
+              </article>
+            ))}
+          </div>
+        </ScrollArea>
+      </CardContent>
+    </Card>
+  );
+}
+
+
+function CommandDeck({
+  className,
+  worldSettings,
+  ticks,
+  overlays,
+  busy,
+  statusMessage,
+  metrics,
+  onSeedChange,
+  onPresetChange,
+  onSizeChange,
+  onTicksChange,
+  onToggleOverlay,
+  onRandomizeSeed,
+  onCopySeed,
+  onGenerateWorld,
+  onRunSimulation,
+  onOpenSetup,
+  onOpenControllers
+}) {
+  return (
+    <Card className={`overflow-hidden ${className}`}>
+      <CardContent className="space-y-5 p-5">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div className="space-y-3">
+            <div className="flex flex-wrap gap-2">
+              <Badge variant="solid">GridNomad</Badge>
+              <Badge variant="muted">Live groups</Badge>
+              <Badge variant="muted">{metrics.aliveHumans} humans visible</Badge>
+            </div>
+            <div className="space-y-2">
+              <h1 className="text-3xl font-semibold tracking-[-0.05em] text-zinc-50 sm:text-4xl">
+                Run human swarms on a dark atlas.
+              </h1>
+              <p className="max-w-4xl text-sm leading-7 text-zinc-400">
+                Controllers power each group in the background, while the population itself becomes the thing you watch on the map.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" onClick={onOpenSetup}>
+              <Settings2 className="size-4" />
+              Setup
+            </Button>
+            <Button variant="secondary" onClick={onOpenControllers}>
+              <Bot className="size-4" />
+              Controllers
+            </Button>
+            <Button variant="secondary" onClick={onGenerateWorld} disabled={busy}>
+              <Sparkles className="size-4" />
+              {busy ? "Working..." : "Generate"}
+            </Button>
+            <Button variant="default" onClick={onRunSimulation} disabled={busy}>
+              <Play className="size-4" />
+              {busy ? "Busy" : "Run live"}
+            </Button>
+          </div>
+        </div>
+
+        <div className="grid gap-3 xl:grid-cols-[minmax(0,1.3fr)_minmax(0,0.7fr)]">
+          <div className="grid gap-3 rounded-[28px] border border-white/8 bg-black/60 p-3 md:grid-cols-[160px_190px_150px_130px_auto]">
+            <Field label="Seed">
+              <Input type="number" value={worldSettings.seed ?? ""} onChange={(event) => onSeedChange(Number(event.target.value))} />
+            </Field>
+            <Field label="Preset">
+              <Select value={worldSettings.generatorPreset ?? "grand-continent"} onValueChange={onPresetChange}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {PRESET_OPTIONS.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field label="Map size">
+              <Select value={String(worldSettings.width ?? 128)} onValueChange={(value) => onSizeChange(Number(value))}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {SIZE_OPTIONS.map((size) => (
+                    <SelectItem key={size} value={String(size)}>
+                      {size} x {size}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field label="Ticks">
+              <Input type="number" min="1" max="500" value={ticks} onChange={(event) => onTicksChange(Number(event.target.value))} />
+            </Field>
+            <div className="flex flex-wrap items-end gap-2">
+              <Button variant="ghost" size="sm" onClick={onCopySeed}>
+                <Copy className="size-3.5" />
+                Copy seed
+              </Button>
+              <Button variant="ghost" size="sm" onClick={onRandomizeSeed} disabled={busy}>
+                <RefreshCcw className="size-3.5" />
+                Randomize
+              </Button>
+            </div>
+          </div>
+
+          <div className="space-y-3 rounded-[28px] border border-white/8 bg-black/60 p-3">
+            <div className="flex flex-wrap gap-2">
+              {Object.entries(overlays).map(([key, enabled]) => (
+                <Button key={key} variant={enabled ? "default" : "secondary"} size="sm" onClick={() => onToggleOverlay(key)}>
+                  {labelForOverlay(key)}
+                </Button>
+              ))}
+            </div>
+            <p className="text-sm leading-6 text-zinc-400">{statusMessage}</p>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+
+function MiniMetric({ icon: Icon, label, value }) {
+  return (
+    <div className="rounded-[24px] border border-white/8 bg-black/50 p-4">
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <p className="text-[11px] uppercase tracking-[0.18em] text-zinc-500">{label}</p>
+        <Icon className="size-4 text-zinc-300" />
+      </div>
+      <p className="text-2xl font-semibold tracking-tight text-zinc-50">{value}</p>
+    </div>
+  );
+}
+
+
+function Field({ label, children }) {
+  return (
+    <label className="grid gap-1.5">
+      <span className="text-[11px] uppercase tracking-[0.18em] text-zinc-500">{label}</span>
+      {children}
+    </label>
+  );
+}
+
+
+function buildMetrics(world) {
+  const aliveHumans = Object.values(world?.agents ?? {}).filter((human) => human.alive !== false).length;
+  const landmarkKinds = new Set(["landmark", "palace", "shrine", "monument", "citadel", "ruin"]);
+  const landmarks = (world?.props ?? []).filter((prop) => landmarkKinds.has(prop.kind)).length;
   return {
-    aliveAgents: agents.filter((agent) => agent.alive !== false).length,
-    settlements: world.settlements?.length ?? 0,
+    aliveHumans,
+    settlements: world?.settlements?.length ?? 0,
     landmarks,
-    seed: world.seed ?? fallbackSeed ?? "..."
+    seed: world?.seed ?? "n/a"
   };
 }
 
 
-function buildTileInsight(world, point) {
+function buildInspector(world, scenario, point) {
   if (!world || !point) {
     return null;
   }
-  const row = world.tiles?.[point.y];
-  const tile = row?.[point.x];
+  const tile = world.tiles?.[point.y]?.[point.x];
   if (!tile) {
     return null;
   }
-  const agents = Object.values(world.agents ?? {}).filter(
-    (agent) => agent.x === point.x && agent.y === point.y && agent.alive !== false
-  );
-  const region = tile.region_id ? world.regions?.[tile.region_id] : null;
-  const settlement = (world.settlements ?? []).find((item) => item.x === point.x && item.y === point.y);
-  const props = (world.props ?? []).filter((prop) => prop.x === point.x && prop.y === point.y);
+  const humans = Object.values(world.agents ?? {}).filter((human) => (
+    human.alive !== false && human.x === point.x && human.y === point.y
+  ));
   const structures = [
-    tile.terrain !== "plain" ? tile.terrain : null,
-    tile.feature,
-    settlement ? `${settlement.kind} settlement` : null,
-    ...props
-      .map((prop) => prop.kind)
-      .filter((kind) => !["tree-cluster", "grove", "mountain", "river-trace"].includes(kind))
-  ].filter(Boolean);
+    ...(tile.feature ? [tile.feature] : []),
+    ...(world.props ?? []).filter((prop) => prop.x === point.x && prop.y === point.y).map((prop) => prop.kind)
+  ];
+  const humansByGroup = Object.entries(humans.reduce((accumulator, human) => {
+    accumulator[human.faction_id] = (accumulator[human.faction_id] ?? 0) + 1;
+    return accumulator;
+  }, {})).map(([groupId, count]) => ({
+    groupId,
+    groupName: scenario?.factions?.find((group) => group.id === groupId)?.name ?? groupId,
+    count
+  }));
   return {
     tile,
-    region,
-    settlement,
-    agents,
-    structures
+    region: tile.region_id ? world.regions?.[tile.region_id] ?? null : null,
+    structures,
+    humans,
+    humansByGroup
   };
 }
 
 
-function describeTerritory(world, factionId) {
-  if (!world || !factionId) {
-    return "Unclaimed or neutral terrain.";
+function buildTerritorySummary(world, inspector) {
+  const owner = inspector?.tile?.owner_faction;
+  if (!owner) {
+    return "This tile is currently unclaimed.";
   }
-  const territory = world.territories?.[factionId];
+  const territory = world?.territories?.[owner];
   if (!territory) {
-    return `Controlled by ${factionId}.`;
+    return `Controlled by ${owner}.`;
   }
-  return `${territory.tile_count} claimed tiles across ${territory.region_ids?.length ?? 0} regions.`;
+  return `${owner} controls ${territory.tile_count} tiles across ${territory.region_ids?.length ?? 0} regions.${territory.capital_id ? ` Capital: ${territory.capital_id}.` : ""}`;
 }
 
 
-function factionLabel(scenario, factionId) {
-  if (!factionId) {
-    return "neutral";
+function labelForOverlay(key) {
+  if (key === "humans") {
+    return "Humans";
   }
-  return scenario?.factions?.find((faction) => faction.id === factionId)?.name ?? factionId;
+  if (key === "territories") {
+    return "Territories";
+  }
+  if (key === "roads") {
+    return "Roads";
+  }
+  return "Resources";
 }
 
 
-function MapMeta({ icon: Icon, label }) {
-  return (
-    <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-sm text-zinc-300">
-      <Icon className="size-4 text-zinc-500" />
-      <span>{label}</span>
-    </div>
-  );
+function clampTicks(value) {
+  if (!Number.isFinite(value)) {
+    return 1;
+  }
+  return Math.max(1, Math.min(500, Math.trunc(value)));
 }
