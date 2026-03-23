@@ -92,6 +92,10 @@ export default function GridNomadDashboard() {
   const [liveTimeMs, setLiveTimeMs] = useState(0);
   const [liveFrame, setLiveFrame] = useState(null);
   const [playbackPaused, setPlaybackPaused] = useState(false);
+  const [runHistory, setRunHistory] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [loadedRunId, setLoadedRunId] = useState("");
+  const [loadedRunScenario, setLoadedRunScenario] = useState(null);
   const [leftOpen, setLeftOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(true);
   const abortRef = useRef(null);
@@ -154,6 +158,7 @@ export default function GridNomadDashboard() {
       } else {
         await generateWorld(normalized, true);
       }
+      await refreshRunHistory(true);
       setStatusMessage("Sandbox loaded. Choose controllers and stream.");
     } catch (error) {
       pushStatus("error", "Bootstrap failed.");
@@ -265,6 +270,8 @@ export default function GridNomadDashboard() {
       setWorld(payload.world);
       setCurrentTick(payload.world?.tick ?? 0);
       setSelectedHumanId(null);
+      setLoadedRunId("");
+      setLoadedRunScenario(null);
       if (!silent) { pushStatus("generation", `World ${payload.world?.seed} generated.`); setStatusMessage(`${payload.world?.width}×${payload.world?.height} world from seed ${payload.world?.seed}.`); }
       return payload.world;
     } catch (error) {
@@ -277,7 +284,67 @@ export default function GridNomadDashboard() {
     }
   }
 
-  async function runSimulationLive() {
+  async function refreshRunHistory(silent = false) {
+    setHistoryLoading(true);
+    try {
+      const response = await fetch("/api/runs", { cache: "no-store" });
+      const payload = await response.json();
+      if (!response.ok || payload.ok === false) {
+        throw new Error(payload.message ?? "Could not load run history.");
+      }
+      setRunHistory(payload.runs ?? []);
+      if (!silent) {
+        pushStatus("history", `Loaded ${payload.runs?.length ?? 0} saved runs.`);
+      }
+    } catch (error) {
+      if (!silent) {
+        pushStatus("error", "Could not load run history.");
+      }
+      pushDebug("history", String(error));
+    } finally {
+      setHistoryLoading(false);
+    }
+  }
+
+  async function loadRunHistoryEntry(runId, { resume = false } = {}) {
+    setWorking(true);
+    try {
+      const response = await fetch(`/api/runs/${encodeURIComponent(runId)}`, { cache: "no-store" });
+      const payload = await response.json();
+      if (!response.ok || payload.ok === false) {
+        throw new Error(payload.message ?? "Could not load the selected run.");
+      }
+      if (!payload.snapshot?.world) {
+        throw new Error("That run does not contain a final snapshot.");
+      }
+      const snapshotTick = payload.snapshot?.tick ?? payload.snapshot?.world?.tick ?? 0;
+      const snapshotTimeMs = snapshotTick * Number(payload.snapshot?.config?.microstep_interval_ms ?? settings.world?.microstep_interval_ms ?? 125);
+      setWorld(payload.snapshot.world);
+      setEvents(payload.events ?? []);
+      setActivityItems(buildActivityItemsFromEvents(payload.events ?? [], settings));
+      setLiveFrame(null);
+      frameQueueRef.current = [];
+      setRunning(false);
+      setCurrentTick(snapshotTick);
+      setLiveTimeMs(snapshotTimeMs);
+      setLoadedRunId(runId);
+      setLoadedRunScenario(payload.resumeScenario ?? null);
+      setSelectedHumanId(null);
+      pushStatus("history", `Loaded run ${runId} at live step ${snapshotTick}.`, snapshotTick, snapshotTimeMs);
+      setStatusMessage(resume ? `Resuming ${runId} from its final snapshot...` : `Loaded ${runId} from history.`);
+      if (resume) {
+        await runSimulationLive({ scenarioOverride: payload.resumeScenario ?? null, sourceRunId: runId });
+      }
+    } catch (error) {
+      pushStatus("error", "Could not load that run.");
+      pushDebug("history", String(error));
+      setStatusMessage("Could not load that run.");
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  async function runSimulationLive({ scenarioOverride = null, sourceRunId = "" } = {}) {
     if (running) return;
     if (!readiness.ready) {
       pushStatus("error", readiness.message);
@@ -289,11 +356,19 @@ export default function GridNomadDashboard() {
     }
     setRunning(true);
     setEvents([]); setActivityItems([]); setStatusItems([]); setDebugLines([]); setCurrentTick(0); setLiveTimeMs(0); setLiveFrame(null); frameQueueRef.current = [];
-    setStatusMessage("Starting live stream...");
+    setStatusMessage(sourceRunId ? `Resuming ${sourceRunId}...` : "Starting live stream...");
     const controller = new AbortController();
     abortRef.current = controller;
     try {
-      const response = await fetch("/api/simulations/stream", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ settings }), signal: controller.signal });
+      const response = await fetch("/api/simulations/stream", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          settings,
+          ...(scenarioOverride ?? loadedRunScenario ? { scenario: scenarioOverride ?? loadedRunScenario } : {})
+        }),
+        signal: controller.signal
+      });
       if (!response.ok || !response.body) {
         const text = await response.text().catch(() => "");
         let message = text || `Stream failed (${response.status}).`;
@@ -322,6 +397,7 @@ export default function GridNomadDashboard() {
     } finally {
       abortRef.current = null;
       setRunning(false);
+      void refreshRunHistory(true);
     }
   }
 
@@ -751,12 +827,19 @@ export default function GridNomadDashboard() {
         {/* RIGHT SIDEBAR — Inspector + Console */}
         {rightOpen && (
           <aside className="flex w-[340px] shrink-0 flex-col border-l border-white/20 bg-[rgba(4,4,4,0.96)]">
-            <div className="min-h-0 flex-1">
+      <div className="min-h-0 flex-1">
               <InspectorTabs
                 scenario={scenario}
                 inspector={inspector}
                 events={events}
                 communications={world?.communications ?? []}
+                runs={runHistory}
+                historyLoading={historyLoading}
+                loadedRunId={loadedRunId}
+                busy={busy}
+                onRefreshRuns={() => refreshRunHistory()}
+                onLoadRun={(runId) => loadRunHistoryEntry(runId)}
+                onResumeRun={(runId) => loadRunHistoryEntry(runId, { resume: true })}
                 className="h-full"
                 panelHeightClass="flex-1 min-h-0"
                 cameraLocked={cameraLocked}
@@ -923,6 +1006,12 @@ function mergeHumanFrame(human, liveFrame) {
     interaction_target_id: frameHuman.target_human_id ?? human.interaction_target_id,
     speaking: frameHuman.speaking ?? false
   };
+}
+
+function buildActivityItemsFromEvents(events, settings) {
+  return (events ?? [])
+    .map((event) => summarizeActivityEvent(event, settings))
+    .filter(Boolean);
 }
 
 function summarizeActivityEvent(event, settings) {

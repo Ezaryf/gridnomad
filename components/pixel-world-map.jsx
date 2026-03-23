@@ -141,6 +141,7 @@ export default function PixelWorldMap({
       const detailLayer = new Container();
       const propLayer = new Container();
       const settlementLayer = new Container();
+      const intentLayer = new Container();
       const agentLayer = new Container();
       const faunaLayer = new Container();
       const fxLayer = new Container();
@@ -153,6 +154,7 @@ export default function PixelWorldMap({
       viewport.addChild(detailLayer);
       viewport.addChild(propLayer);
       viewport.addChild(settlementLayer);
+      viewport.addChild(intentLayer);
       viewport.addChild(agentLayer);
       viewport.addChild(faunaLayer);
       viewport.addChild(fxLayer);
@@ -184,6 +186,7 @@ export default function PixelWorldMap({
           detailLayer,
           propLayer,
           settlementLayer,
+          intentLayer,
           agentLayer,
           faunaLayer,
           fxLayer,
@@ -353,14 +356,106 @@ export default function PixelWorldMap({
         <div className="pointer-events-auto rounded-2xl border border-white/8 bg-black/70 px-3 py-2 text-xs uppercase tracking-[0.18em] text-zinc-500 backdrop-blur-md">
           Drag to pan. Scroll or pinch to zoom.
         </div>
-        <div className="pointer-events-auto rounded-2xl border border-white/8 bg-black/70 px-3 py-2 text-xs uppercase tracking-[0.18em] text-zinc-500 backdrop-blur-md">
-          Pixi atlas stage
+        <div className="pointer-events-auto flex flex-col gap-2 rounded-2xl border border-white/8 bg-black/70 p-2 backdrop-blur-md">
+          <MiniMap
+            world={world}
+            selectedTile={selectedTile}
+            selectedHumanId={selectedHumanId}
+            onSelectTile={onSelectTile}
+          />
+          <div className="px-1 text-[10px] uppercase tracking-[0.18em] text-zinc-500">
+            Overview
+          </div>
         </div>
       </div>
     </div>
   );
 }
 
+function MiniMap({ world, selectedTile, selectedHumanId, onSelectTile }) {
+  const size = 132;
+  const canvasRef = useRef(null);
+
+  useEffect(() => {
+    if (!canvasRef.current || !world) {
+      return;
+    }
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      return;
+    }
+    ctx.clearRect(0, 0, size, size);
+    const cellWidth = size / Math.max(1, world.width);
+    const cellHeight = size / Math.max(1, world.height);
+
+    for (let y = 0; y < world.height; y += 1) {
+      for (let x = 0; x < world.width; x += 1) {
+        const tile = world.tiles?.[y]?.[x];
+        ctx.fillStyle = miniTileColor(tile);
+        ctx.fillRect(Math.floor(x * cellWidth), Math.floor(y * cellHeight), Math.ceil(cellWidth), Math.ceil(cellHeight));
+      }
+    }
+
+    for (const structure of Object.values(world.structures ?? {})) {
+      ctx.fillStyle = structure.kind === "bridge" ? "#d1a869" : "#d26f57";
+      ctx.fillRect(
+        Math.floor(structure.x * cellWidth),
+        Math.floor(structure.y * cellHeight),
+        Math.max(2, Math.ceil(cellWidth)),
+        Math.max(2, Math.ceil(cellHeight))
+      );
+    }
+
+    for (const human of Object.values(world.humans ?? world.agents ?? {})) {
+      if (human.alive === false) {
+        continue;
+      }
+      ctx.fillStyle = cssHex(factionTint(human.faction_id));
+      ctx.fillRect(
+        Math.floor(human.x * cellWidth),
+        Math.floor(human.y * cellHeight),
+        Math.max(2, Math.ceil(cellWidth)),
+        Math.max(2, Math.ceil(cellHeight))
+      );
+    }
+
+    const selectedHuman = selectedHumanId ? (world.humans ?? world.agents ?? {})[selectedHumanId] : null;
+    const focus = selectedHuman ?? selectedTile;
+    if (focus) {
+      ctx.strokeStyle = "#f8fafc";
+      ctx.lineWidth = 2;
+      ctx.strokeRect(
+        Math.floor(focus.x * cellWidth),
+        Math.floor(focus.y * cellHeight),
+        Math.max(3, Math.ceil(cellWidth)),
+        Math.max(3, Math.ceil(cellHeight))
+      );
+    }
+  }, [world, selectedTile, selectedHumanId]);
+
+  function handleClick(event) {
+    if (!world || !canvasRef.current) {
+      return;
+    }
+    const bounds = canvasRef.current.getBoundingClientRect();
+    const localX = event.clientX - bounds.left;
+    const localY = event.clientY - bounds.top;
+    const tileX = Math.max(0, Math.min(world.width - 1, Math.floor((localX / bounds.width) * world.width)));
+    const tileY = Math.max(0, Math.min(world.height - 1, Math.floor((localY / bounds.height) * world.height)));
+    onSelectTile?.({ x: tileX, y: tileY });
+  }
+
+  return (
+    <canvas
+      ref={canvasRef}
+      width={size}
+      height={size}
+      onClick={handleClick}
+      className="h-[132px] w-[132px] rounded-xl border border-white/10 bg-black/30 image-rendering-pixelated"
+    />
+  );
+}
 
 function renderStaticWorld(runtime, world, overlays, worldSignature) {
   if (!runtime || !world) {
@@ -578,10 +673,11 @@ function renderDynamicWorld(runtime, world, overlays, liveFrame, selectedHumanId
   if (!runtime || !world) {
     return;
   }
-  const { Sprite } = runtime.pixi;
-  const { agentLayer, faunaLayer } = runtime.layers;
+  const { Graphics, Sprite } = runtime.pixi;
+  const { agentLayer, faunaLayer, intentLayer } = runtime.layers;
   clearLayer(agentLayer);
   clearLayer(faunaLayer);
+  clearLayer(intentLayer);
 
   if (!overlays?.humans) {
     runtime.humanHitTargets = [];
@@ -639,6 +735,54 @@ function renderDynamicWorld(runtime, world, overlays, liveFrame, selectedHumanId
   }
 
   runtime.humanHitTargets = nextHumanHitTargets;
+
+  const selectedSource = selectedHumanId ? humansById[selectedHumanId] : null;
+  const selectedFrame = selectedHumanId ? humans.find((human) => human.id === selectedHumanId) ?? null : null;
+  if (!selectedSource || !selectedFrame) {
+    return;
+  }
+
+  const trail = Array.isArray(selectedSource.position_history) ? selectedSource.position_history.slice(-10) : [];
+  if (trail.length > 1) {
+    const trailGraphic = new Graphics();
+    trailGraphic.lineStyle(2, factionTint(selectedSource.faction_id), 0.45);
+    trail.forEach((point, index) => {
+      const px = (point.x * TILE_SIZE) + (TILE_SIZE / 2);
+      const py = (point.y * TILE_SIZE) + (TILE_SIZE / 2);
+      if (index === 0) {
+        trailGraphic.moveTo(px, py);
+      } else {
+        trailGraphic.lineTo(px, py);
+      }
+    });
+    intentLayer.addChild(trailGraphic);
+  }
+
+  const originX = ((selectedFrame.render_x ?? selectedFrame.x) * TILE_SIZE) + (TILE_SIZE / 2);
+  const originY = ((selectedFrame.render_y ?? selectedFrame.y) * TILE_SIZE) + (TILE_SIZE / 2);
+  let targetX = null;
+  let targetY = null;
+  if (selectedSource.task_target_x != null && selectedSource.task_target_y != null) {
+    targetX = (selectedSource.task_target_x * TILE_SIZE) + (TILE_SIZE / 2);
+    targetY = (selectedSource.task_target_y * TILE_SIZE) + (TILE_SIZE / 2);
+  } else if (selectedSource.interaction_target_id) {
+    const targetSource = humansById[selectedSource.interaction_target_id];
+    const targetFrame = humans.find((human) => human.id === selectedSource.interaction_target_id) ?? null;
+    if (targetSource) {
+      targetX = ((targetFrame?.render_x ?? targetSource.x) * TILE_SIZE) + (TILE_SIZE / 2);
+      targetY = ((targetFrame?.render_y ?? targetSource.y) * TILE_SIZE) + (TILE_SIZE / 2);
+    }
+  }
+  if (targetX != null && targetY != null) {
+    const targetGraphic = new Graphics();
+    targetGraphic.lineStyle(2, factionTint(selectedSource.faction_id), 0.85);
+    targetGraphic.moveTo(originX, originY);
+    targetGraphic.lineTo(targetX, targetY);
+    targetGraphic.beginFill(0xffffff, 0.92);
+    targetGraphic.drawCircle(targetX, targetY, 3.5);
+    targetGraphic.endFill();
+    intentLayer.addChild(targetGraphic);
+  }
 }
 
 function renderEnvironment(runtime, world) {
@@ -1082,6 +1226,25 @@ function placeRing(sprite, tile, tint) {
   sprite.y = (tile.y * TILE_SIZE) + (TILE_SIZE / 2);
   sprite.width = TILE_SIZE;
   sprite.height = TILE_SIZE;
+}
+
+function miniTileColor(tile) {
+  if (!tile) return "#0b1220";
+  if (tile.terrain === "bridge") return "#b88954";
+  if (tile.terrain === "house") return "#c96f57";
+  if (tile.terrain === "farm") return "#8da94a";
+  if (tile.terrain === "water") return tile.feature === "river" ? "#2f6ea7" : "#123f74";
+  if (tile.biome === "forest" || tile.biome === "jungle" || tile.feature === "forest") return "#315f30";
+  if (tile.biome === "desert" || tile.biome === "savanna" || tile.biome === "sand") return "#b79056";
+  if (tile.biome === "snow" || tile.biome === "tundra") return "#d7e4ef";
+  if (tile.biome === "swamp") return "#516b45";
+  if (tile.biome === "mountain" || tile.biome === "hills" || tile.feature === "mountain") return "#6d7278";
+  if (tile.tree_cover > 0) return "#47793c";
+  return "#6f9d4e";
+}
+
+function cssHex(value) {
+  return `#${Number(value ?? 0).toString(16).padStart(6, "0")}`;
 }
 
 

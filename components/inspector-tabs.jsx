@@ -1,9 +1,10 @@
 "use client";
 
-import { Clock3, Eye, MessagesSquare } from "lucide-react";
+import { Clock3, Eye, History, MessagesSquare, RefreshCcw } from "lucide-react";
 
 import { providerDisplayName } from "@/lib/civilization-setup";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
@@ -13,6 +14,13 @@ export default function InspectorTabs({
   inspector,
   events,
   communications = [],
+  runs = [],
+  historyLoading = false,
+  loadedRunId = "",
+  busy = false,
+  onRefreshRuns,
+  onLoadRun,
+  onResumeRun,
   className = "",
   panelHeightClass = "flex-1 min-h-0"
 }) {
@@ -26,7 +34,7 @@ export default function InspectorTabs({
       </div>
       <Tabs defaultValue="inspect" className="flex min-h-0 flex-1 flex-col">
         <div className="border-b border-white/20 px-3 py-1.5">
-          <TabsList className="grid w-full grid-cols-3 h-8">
+          <TabsList className="grid w-full grid-cols-4 h-8">
             <TabsTrigger value="inspect" className="text-xs h-full">
               <Eye className="mr-1.5 size-3.5" />
               Inspect
@@ -38,6 +46,10 @@ export default function InspectorTabs({
             <TabsTrigger value="comms" className="text-xs h-full">
               <MessagesSquare className="mr-1.5 size-3.5" />
               Comms
+            </TabsTrigger>
+            <TabsTrigger value="history" className="text-xs h-full">
+              <History className="mr-1.5 size-3.5" />
+              Runs
             </TabsTrigger>
           </TabsList>
         </div>
@@ -147,6 +159,76 @@ export default function InspectorTabs({
             )}
           </ScrollArea>
         </TabsContent>
+
+        <TabsContent value="history" className="m-0 min-h-0 flex-1">
+          <ScrollArea className="h-full px-3 py-3">
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <p className="text-[9px] uppercase tracking-[0.2em] text-zinc-500">Run history</p>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 border-white/10 bg-white/5 text-[10px]"
+                onClick={() => onRefreshRuns?.()}
+                disabled={historyLoading}
+              >
+                <RefreshCcw className={`mr-1.5 size-3 ${historyLoading ? "animate-spin" : ""}`} />
+                Refresh
+              </Button>
+            </div>
+            {runs.length === 0 ? (
+              <div className="rounded-xl border border-white/20 bg-white/10 p-4 text-xs leading-6 text-zinc-400 backdrop-blur-[10px] backdrop-saturate-180">
+                No saved runs yet. Stream a simulation and it will appear here.
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {runs.slice(0, 16).map((run) => (
+                  <article
+                    key={run.id}
+                    className={`rounded-xl border p-3 backdrop-blur-[10px] backdrop-saturate-180 ${
+                      run.id === loadedRunId ? "border-emerald-500/30 bg-emerald-500/10" : "border-white/20 bg-white/10"
+                    }`}
+                  >
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <Badge variant="outline" className="h-5 text-[10px]">
+                        {run.source}
+                      </Badge>
+                      <span className="text-[9px] uppercase tracking-[0.15em] text-zinc-500">
+                        Live step {run.final_tick ?? 0}
+                      </span>
+                    </div>
+                    <p className="truncate text-[11px] font-semibold text-zinc-100">{run.id}</p>
+                    <p className="mt-1 text-[11px] text-zinc-400">
+                      {(run.width && run.height) ? `${run.width}×${run.height}` : "unknown size"} · seed {run.seed ?? "n/a"} · {run.event_count ?? 0} events
+                    </p>
+                    {run.updated_at ? (
+                      <p className="mt-1 text-[10px] text-zinc-500">{new Date(run.updated_at).toLocaleString()}</p>
+                    ) : null}
+                    <div className="mt-3 flex items-center gap-2">
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        className="h-7 text-[10px]"
+                        onClick={() => onLoadRun?.(run.id)}
+                        disabled={busy}
+                      >
+                        Load
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7 text-[10px]"
+                        onClick={() => onResumeRun?.(run.id)}
+                        disabled={busy}
+                      >
+                        Resume
+                      </Button>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
+          </ScrollArea>
+        </TabsContent>
       </Tabs>
     </div>
   );
@@ -174,6 +256,7 @@ function HumanPanel({ human, group, controller, recentMemories = [] }) {
         <Chip label="Group" value={group} />
         <Chip label="Controller" value={provider} />
         <Chip label="Model" value={model} />
+        <Chip label="Role" value={human.role || "citizen"} />
         <Chip label="Position" value={`${human.x}, ${human.y}`} />
         <Chip label="Task" value={human.task_state ?? "idle"} />
         <Chip label="Age" value={String(human.age_ticks ?? 0)} />
@@ -188,6 +271,7 @@ function HumanPanel({ human, group, controller, recentMemories = [] }) {
       </div>
 
       <Section title="Intent">{human.current_intent || human.last_intent?.reason || "None."}</Section>
+      <Section title="Goal">{human.last_goal || "None."}</Section>
       <Section title="Thought">{human.last_thought || "None."}</Section>
       <Section title="Speech">{human.last_speech || "None."}</Section>
       <Section title="Interaction target">{human.interaction_target_id || "None."}</Section>
