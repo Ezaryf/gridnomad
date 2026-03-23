@@ -259,6 +259,7 @@ class Simulation:
         recent_events = self.memory_store.recent_events(agent.id, limit=5)
         memories = self.memory_store.recent_thoughts(agent.id, limit=5)
         recent_messages = self._recent_messages_for_agent(agent)
+        group_context = self._group_context_for_agent(agent)
         context = build_agent_context(
             self.world.tick,
             agent,
@@ -268,8 +269,45 @@ class Simulation:
             memories,
             recent_messages,
             self.culture_store.summarize(agent.faction_id),
+            group_context,
         )
         return agent, perception, context
+
+    def _group_context_for_agent(self, agent: AgentState) -> str:
+        group_agents = [
+            other
+            for other in self.world.agents.values()
+            if other.faction_id == agent.faction_id and other.alive
+        ]
+        if not group_agents:
+            return "You are effectively alone right now."
+        total_food = sum(other.inventory.food for other in group_agents)
+        total_wood = sum(other.inventory.wood for other in group_agents)
+        total_stone = sum(other.inventory.stone for other in group_agents)
+        avg_survival = round(sum(other.needs.survival for other in group_agents) / len(group_agents), 1)
+        avg_safety = round(sum(other.needs.safety for other in group_agents) / len(group_agents), 1)
+        avg_belonging = round(sum(other.needs.belonging for other in group_agents) / len(group_agents), 1)
+        homes = [
+            structure
+            for structure in self.world.structures.values()
+            if structure.owner_faction_id == agent.faction_id and structure.kind == "home"
+        ]
+        bridges = [
+            structure
+            for structure in self.world.structures.values()
+            if structure.owner_faction_id == agent.faction_id and structure.kind == "bridge"
+        ]
+        armed = sum(1 for other in group_agents if other.weapon_kind)
+        pregnant = sum(1 for other in group_agents if other.pregnancy_ticks_remaining > 0)
+        starving = sum(1 for other in group_agents if other.needs.survival >= 6)
+        wounded = sum(1 for other in group_agents if other.health <= 5)
+        return (
+            f"Alive humans in group: {len(group_agents)}. "
+            f"Shared carried resources are food={total_food}, wood={total_wood}, stone={total_stone}. "
+            f"Average pressure is survival={avg_survival}, safety={avg_safety}, belonging={avg_belonging}. "
+            f"The group currently has {len(homes)} home(s), {len(bridges)} bridge(s), {armed} armed human(s), "
+            f"{pregnant} pregnancy/pending birth state(s), {starving} human(s) with urgent survival pressure, and {wounded} wounded human(s)."
+        )
 
     def _resolve_decision_input(self, item: tuple[AgentState, object, AgentContext]) -> AgentDecisionFrame:
         agent, perception, context = item
@@ -508,10 +546,11 @@ class Simulation:
     def _world_decay_update(self) -> list[SimulationEvent]:
         events: list[SimulationEvent] = []
         current_time_ms = self.current_time_ms
-        survival_interval = max(1, round(12000 / self.config.microstep_interval_ms))
-        belonging_interval = max(1, round(15000 / self.config.microstep_interval_ms))
-        self_actualization_interval = max(1, round(16000 / self.config.microstep_interval_ms))
-        safety_interval = max(1, round(14000 / self.config.microstep_interval_ms))
+        survival_interval = max(1, round(6000 / self.config.microstep_interval_ms))
+        belonging_interval = max(1, round(8000 / self.config.microstep_interval_ms))
+        self_actualization_interval = max(1, round(10000 / self.config.microstep_interval_ms))
+        safety_interval = max(1, round(7000 / self.config.microstep_interval_ms))
+        esteem_interval = max(1, round(9000 / self.config.microstep_interval_ms))
         time_of_day_interval = max(1, round(15000 / self.config.microstep_interval_ms))
         weather_interval = max(1, round(30000 / self.config.microstep_interval_ms))
 
@@ -549,6 +588,8 @@ class Simulation:
                 agent.needs.belonging = min(10, agent.needs.belonging + 1)
             if self.world.tick % self_actualization_interval == 0:
                 agent.needs.self_actualization = min(10, agent.needs.self_actualization + 1)
+            if self.world.tick % esteem_interval == 0:
+                agent.needs.esteem = min(10, agent.needs.esteem + 1)
 
             current_tile = self.world.get_tile(agent.x, agent.y)
             if current_tile.terrain == TileType.HOUSE or current_tile.structure_kind == "home":
@@ -560,6 +601,20 @@ class Simulation:
                 agent.critical_survival_ticks += 1
             else:
                 agent.critical_survival_ticks = max(0, agent.critical_survival_ticks - 1)
+
+            hunger_drain_interval = max(1, round(15000 / self.config.microstep_interval_ms))
+            if agent.needs.survival >= 8 and agent.inventory.food == 0 and self.world.tick % hunger_drain_interval == 0:
+                agent.health = max(0, agent.health - 1)
+                if agent.health > 0:
+                    events.append(
+                        self._event(
+                            kind="HUNGER",
+                            description=f"{agent.name} is weakening from hunger.",
+                            success=False,
+                            actor_id=agent.id,
+                            faction_id=agent.faction_id,
+                        )
+                    )
 
             if agent.pregnancy_ticks_remaining == 0 and agent.pregnancy_partner_id:
                 birth_event = self._complete_birth(agent)
@@ -932,7 +987,12 @@ class Simulation:
         if abs(target.x - actor.x) + abs(target.y - actor.y) > 1:
             actor.last_action_success = False
             return self._event("TRANSFER", f"{actor.name} is too far from {target.name} to share anything.", False, actor.id, faction_id=actor.faction_id)
-        resource, amount = actor.inventory.most_abundant()
+        requested = (decision.target_resource_kind or "").strip().lower()
+        if requested in {"food", "wood", "stone"}:
+            resource = requested
+            amount = getattr(actor.inventory, resource)
+        else:
+            resource, amount = actor.inventory.most_abundant()
         if amount <= 0:
             actor.last_action_success = False
             return self._event("TRANSFER", f"{actor.name} had nothing to share.", False, actor.id, target_agent_id=target.id, faction_id=actor.faction_id)
@@ -1005,7 +1065,27 @@ class Simulation:
         else:
             agent.repeated_message_streak = 0
 
+        if decision.intent.strip():
+            agent.last_goal = decision.intent.strip()
+        self._refresh_role(agent, primary)
         self._record_position(agent)
+
+    def _refresh_role(self, agent: AgentState, primary: SimulationEvent | None) -> None:
+        if primary is None or not primary.success:
+            return
+        next_role = {
+            "GATHER": "forager",
+            "BUILD": "builder",
+            "CRAFT": "crafter",
+            "ATTACK": "fighter",
+            "REPRODUCE": "caretaker",
+            "TRANSFER": "supporter",
+            "COMMUNICATE": "messenger",
+            "INTERACT": "socializer",
+            "CONSUME": "survivor",
+        }.get(primary.kind)
+        if next_role:
+            agent.role = next_role
 
     def _record_position(self, agent: AgentState) -> None:
         current = {"x": agent.x, "y": agent.y}

@@ -10,8 +10,14 @@ from gridnomad.core.culture import CultureStore
 from gridnomad.core.generation import GeneratedWorldBundle, generate_seeded_world
 from gridnomad.core.models import (
     AgentState,
+    AnimalUnitState,
+    BattleState,
+    CityState,
+    CommunicationMessage,
     FactionState,
+    KingdomState,
     SimulationConfig,
+    StructureState,
     TileState,
     WorldState,
 )
@@ -73,7 +79,12 @@ def load_scenario_data(
     kingdom_growth_intensity_override: int | None = None,
 ) -> ScenarioBundle:
     config = SimulationConfig.from_dict(data["config"])
-    factions = {item["id"]: FactionState.from_dict(item) for item in data.get("factions", [])}
+    snapshot_world = data.get("world") if isinstance(data.get("world"), dict) else None
+    faction_payload = data.get("factions", snapshot_world.get("factions", {}) if snapshot_world else {})
+    factions = {
+        item["id"]: FactionState.from_dict(item)
+        for item in _iter_payload_items(faction_payload)
+    }
     generator = data.get("generator")
 
     if generator:
@@ -117,8 +128,9 @@ def load_scenario_data(
         config.map_width = world.width
         config.map_height = world.height
     else:
+        world_payload = snapshot_world or data
         tiles = [[TileState() for _ in range(config.width)] for _ in range(config.height)]
-        for tile_data in data.get("tiles", []):
+        for tile_data in _flatten_tiles(world_payload.get("tiles", [])):
             x = int(tile_data["x"])
             y = int(tile_data["y"])
             tiles[y][x] = TileState.from_dict(tile_data)
@@ -128,8 +140,45 @@ def load_scenario_data(
             tiles=tiles,
             agents={},
             factions=factions,
-            seed=int(data.get("seed", 0) if seed_override is None else seed_override),
+            tick=int(world_payload.get("tick", data.get("tick", 0))),
+            seed=int(world_payload.get("seed", data.get("seed", 0) if seed_override is None else seed_override)),
         )
+        world.props = [dict(item) for item in world_payload.get("props", [])]
+        world.regions = {str(region_id): dict(payload) for region_id, payload in dict(world_payload.get("regions", {})).items()}
+        world.settlements = [dict(item) for item in world_payload.get("settlements", [])]
+        world.roads = [dict(item) for item in world_payload.get("roads", [])]
+        world.territories = {
+            str(faction_id): dict(payload)
+            for faction_id, payload in dict(world_payload.get("territories", {})).items()
+        }
+        world.communications = [
+            CommunicationMessage.from_dict(item)
+            for item in world_payload.get("communications", [])
+            if isinstance(item, dict)
+        ]
+        world.animals = {
+            item["id"]: AnimalUnitState.from_dict(item)
+            for item in _iter_payload_items(world_payload.get("animals", {}))
+        }
+        world.cities = {
+            item["id"]: CityState.from_dict(item)
+            for item in _iter_payload_items(world_payload.get("cities", {}))
+        }
+        world.kingdoms = {
+            item["id"]: KingdomState.from_dict(item)
+            for item in _iter_payload_items(world_payload.get("kingdoms", {}))
+        }
+        world.structures = {
+            item["id"]: StructureState.from_dict(item)
+            for item in _iter_payload_items(world_payload.get("structures", {}))
+        }
+        world.battles = {
+            item["id"]: BattleState.from_dict(item)
+            for item in _iter_payload_items(world_payload.get("battles", {}))
+        }
+        world.fauna_events = [dict(item) for item in world_payload.get("fauna_events", [])]
+        world.time_of_day = int(world_payload.get("time_of_day", 8))
+        world.weather = str(world_payload.get("weather", "clear"))
         if biome_density_override is not None:
             config.biome_density = int(biome_density_override)
         if fauna_density_override is not None:
@@ -138,16 +187,27 @@ def load_scenario_data(
             config.kingdom_growth_intensity = int(kingdom_growth_intensity_override)
         generated = None
 
-    world.agents = _build_agents(data.get("agents", []), world, generated)
-    world.kingdoms = {}
-    world.cities = {}
-    world.structures = {}
-    world.animals = {}
-    world.battles = {}
-    world.fauna_events = []
+    agent_payload = (
+        snapshot_world.get("agents", snapshot_world.get("humans", {}))
+        if snapshot_world
+        else data.get("agents", data.get("humans", []))
+    )
+    world.agents = _build_agents(_iter_payload_items(agent_payload), world, generated)
+    if generated is not None:
+        world.kingdoms = {}
+        world.cities = {}
+        world.structures = {}
+        world.animals = {}
+        world.battles = {}
+        world.fauna_events = []
     culture_store = CultureStore()
-    for faction in data.get("factions", []):
-        culture_store.seed_faction(faction["id"], list(faction.get("culture", [])))
+    culture_payload = data.get("culture", {})
+    if isinstance(culture_payload, dict) and culture_payload:
+        for faction_id, elements in culture_payload.items():
+            culture_store.seed_faction(str(faction_id), list(elements))
+    else:
+        for faction in _iter_payload_items(faction_payload):
+            culture_store.seed_faction(faction["id"], list(faction.get("culture", [])))
 
     return ScenarioBundle(config=config, world=world, culture_store=culture_store)
 
@@ -212,6 +272,29 @@ def _resolve_spawn_point(
             if (x, y) not in occupied and world.get_tile(x, y).passable:
                 return x, y
     return 0, 0
+
+
+def _iter_payload_items(payload: Any) -> list[dict[str, Any]]:
+    if isinstance(payload, dict):
+        return [dict(item) for item in payload.values() if isinstance(item, dict)]
+    if isinstance(payload, list):
+        return [dict(item) for item in payload if isinstance(item, dict)]
+    return []
+
+
+def _flatten_tiles(payload: Any) -> list[dict[str, Any]]:
+    if not isinstance(payload, list):
+        return []
+    if payload and isinstance(payload[0], list):
+        flattened: list[dict[str, Any]] = []
+        for row in payload:
+            if not isinstance(row, list):
+                continue
+            for item in row:
+                if isinstance(item, dict):
+                    flattened.append(dict(item))
+        return flattened
+    return [dict(item) for item in payload if isinstance(item, dict)]
 
 
 def _spawn_ring(world: WorldState, x: int, y: int) -> list[tuple[int, int]]:

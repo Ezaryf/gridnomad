@@ -28,6 +28,7 @@ class AgentContext:
     memories: list[str]
     recent_messages: dict[str, list[str]]
     cultural_context: str
+    group_context: str
     prompt: str
 
 
@@ -126,20 +127,89 @@ class HeuristicLLMAdapter:
             action = "CONSUME"
             reason = "I have food on hand and I need to stabilize myself before doing anything else."
             intent = "Eat what I have and get steady before I move again."
-        else:
-            move_names = sorted(MOVE_DELTAS)
-            index = (sum(ord(char) for char in agent.id) + agent_context.tick + self.deterministic_offset) % len(move_names)
-            action = move_names[index]
+        elif agent.stuck_steps >= 3 and perception.frontier_direction:
+            move_toward = self._direction_to_move(perception.frontier_direction)
+            action = move_toward
             dx, dy = MOVE_DELTAS[action]
             target_x = agent.x + dx
             target_y = agent.y + dy
-            reason = "I do not face an urgent crisis, so I want to choose one immediate movement step and then reassess."
-            intent = "Scout one nearby tile, then decide again from the new position."
+            reason = "I have been circling too long. I need to break out and head toward unexplored ground."
+            intent = f"Escape the local loop and push {perception.frontier_direction} toward fresh terrain."
+            speech = self._pick_speech(agent, agent_context.tick, "escape")
+            outbound_message = OutboundMessage(
+                scope="civilization",
+                text=f"Breaking out of a rut, heading {perception.frontier_direction}."
+            )
+        elif agent.needs.survival >= 5 and (perception.nearby_farmable or perception.nearest_resource_hints):
+            if perception.nearby_farmable:
+                target_x, target_y = self._nearest_tile(agent, perception.nearby_farmable)
+            action = "GATHER"
+            reason = "My survival need is growing and I should gather supplies before it becomes critical."
+            intent = "Secure food or usable materials while I can still think clearly."
+            speech = self._pick_speech(agent, agent_context.tick, "gather")
+            target_resource_kind = "food"
+            gather_mode = "forage_food"
+            outbound_message = OutboundMessage(
+                scope="civilization",
+                text="Gathering supplies before things get urgent."
+            )
+        elif perception.visible_resources and agent_context.tick % 2 == 0:
+            action = "GATHER"
+            resource_bias = (agent.resource_bias or "food").lower()
+            if resource_bias in ("wood", "stone"):
+                gather_mode = "cut_tree" if resource_bias == "wood" else "quarry_stone"
+                target_resource_kind = resource_bias
+            else:
+                gather_mode = "forage_food"
+                target_resource_kind = "food"
+            reason = f"There are resources nearby and I want to collect {target_resource_kind} for the group."
+            intent = f"Gather {target_resource_kind} from what I can see around me."
+            speech = self._pick_speech(agent, agent_context.tick, "resource")
+            outbound_message = OutboundMessage(
+                scope="civilization",
+                text=f"I spotted {target_resource_kind} nearby, picking some up."
+            )
+        elif agent.inventory.wood >= 3 and agent.inventory.stone >= 1:
+            action = "BUILD"
+            reason = "I have enough material to start something useful for the group."
+            intent = "Build a shelter or structure with the materials I have been carrying."
+            speech = self._pick_speech(agent, agent_context.tick, "build")
+            build_kind = "home"
+            outbound_message = OutboundMessage(
+                scope="civilization",
+                text="Starting to build with the materials I gathered."
+            )
+        elif perception.friendly_agents and agent_context.tick % 3 == 0:
+            friend = agent_context.world.agents[perception.friendly_agents[0]]
+            action = "INTERACT" if agent.needs.belonging >= 4 else "COMMUNICATE"
+            target_x, target_y = friend.x, friend.y
+            target_agent_id = friend.id
+            reason = f"I want to connect with {friend.name} and keep the group together."
+            intent = f"Spend time with {friend.name} and stay coordinated."
+            speech = self._pick_speech(agent, agent_context.tick, "social")
+            interaction_mode = "support" if action == "INTERACT" else "conversation"
+            outbound_message = OutboundMessage(
+                scope="civilization",
+                target_agent_id=friend.id,
+                text=f"Checking in with {friend.name}."
+            )
+        else:
+            if perception.frontier_direction:
+                action = self._direction_to_move(perception.frontier_direction)
+            else:
+                move_names = sorted(MOVE_DELTAS)
+                index = (sum(ord(char) for char in agent.id) + agent_context.tick + self.deterministic_offset) % len(move_names)
+                action = move_names[index]
+            dx, dy = MOVE_DELTAS[action]
+            target_x = agent.x + dx
+            target_y = agent.y + dy
+            reason = "I want to explore and find something useful for myself or the group."
+            intent = "Move toward less-explored ground and look for resources or people."
+            speech = self._pick_speech(agent, agent_context.tick, "explore")
             if agent_context.tick % 4 == 0:
-                speech = "I am moving ahead to see what is out there."
                 outbound_message = OutboundMessage(
                     scope="civilization",
-                    text="I am scouting ahead and will report what I find."
+                    text=self._pick_speech(agent, agent_context.tick, "report")
                 )
 
         updated_emotions = Emotions(
@@ -195,6 +265,68 @@ class HeuristicLLMAdapter:
     def _nearest_tile(self, agent: AgentState, points: list[tuple[int, int]]) -> tuple[int, int]:
         return min(points, key=lambda point: (abs(point[0] - agent.x) + abs(point[1] - agent.y), point[1], point[0]))
 
+    def _direction_to_move(self, direction: str) -> str:
+        direction_lower = direction.lower()
+        if "north" in direction_lower:
+            return "MOVE_NORTH"
+        if "south" in direction_lower:
+            return "MOVE_SOUTH"
+        if "east" in direction_lower:
+            return "MOVE_EAST"
+        if "west" in direction_lower:
+            return "MOVE_WEST"
+        return "MOVE_NORTH"
+
+    _SPEECH_POOLS: dict[str, list[str]] = {
+        "escape": [
+            "I need to break free from this loop.",
+            "Time to try a different path.",
+            "I keep coming back to the same spot. Enough.",
+            "This area has nothing new. Moving on.",
+        ],
+        "gather": [
+            "I should stock up before I get too hungry.",
+            "Let me see what I can find here.",
+            "These supplies will help the group.",
+            "Better to gather while it is safe.",
+        ],
+        "resource": [
+            "I see something useful nearby.",
+            "There is material here worth collecting.",
+            "This could be exactly what we need.",
+            "Picking up what I can before I move on.",
+        ],
+        "build": [
+            "Time to put these materials to use.",
+            "This spot could become a shelter.",
+            "Building something solid here.",
+            "Let me set up a structure for the group.",
+        ],
+        "social": [
+            "Hey, how are you holding up?",
+            "Good to see a familiar face.",
+            "Let us stick together for a while.",
+            "We should coordinate our next move.",
+        ],
+        "explore": [
+            "Curious what is out there.",
+            "I want to see what lies ahead.",
+            "Pushing into new ground.",
+            "Let me check this direction.",
+        ],
+        "report": [
+            "The terrain looks different ahead.",
+            "Reporting back on what I found.",
+            "Nothing dangerous so far, still moving.",
+            "Scouting this area for the group.",
+        ],
+    }
+
+    def _pick_speech(self, agent: AgentState, tick: int, category: str) -> str:
+        pool = self._SPEECH_POOLS.get(category, self._SPEECH_POOLS["explore"])
+        index = (sum(ord(char) for char in agent.id) + tick) % len(pool)
+        return pool[index]
+
 
 class ScriptedLLMAdapter:
     def __init__(self, responses: dict[str, list[DecisionPayload | str]] | list[DecisionPayload | str]) -> None:
@@ -221,9 +353,10 @@ def build_agent_context(
     memories: list[str],
     recent_messages: dict[str, list[str]],
     cultural_context: str,
+    group_context: str,
 ) -> AgentContext:
     prompt_view = AgentPromptView.from_agent(agent, memories)
-    prompt = build_agent_prompt(prompt_view, perception.text, recent_events, recent_messages, cultural_context)
+    prompt = build_agent_prompt(prompt_view, perception.text, recent_events, recent_messages, cultural_context, group_context)
     return AgentContext(
         tick=tick,
         agent=agent,
@@ -233,6 +366,7 @@ def build_agent_context(
         memories=memories,
         recent_messages=recent_messages,
         cultural_context=cultural_context,
+        group_context=group_context,
         prompt=prompt,
     )
 
