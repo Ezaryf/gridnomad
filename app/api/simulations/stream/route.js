@@ -29,7 +29,10 @@ export async function POST(request) {
   if (!readiness.ok) {
     return NextResponse.json(readiness, { status: 400 });
   }
-  const synthesizedScenario = synthesizeScenario(baseScenario, mergedSettings);
+  const synthesizedScenario =
+    payload.scenario && typeof payload.scenario === "object"
+      ? payload.scenario
+      : synthesizeScenario(baseScenario, mergedSettings);
   const durationSeconds = Math.max(10, Number(mergedSettings.world?.run_duration_seconds ?? 80));
   const microstepIntervalMs = Math.max(16, Number(mergedSettings.world?.microstep_interval_ms ?? 125));
   const ticks = Math.max(1, Math.ceil((durationSeconds * 1000) / microstepIntervalMs));
