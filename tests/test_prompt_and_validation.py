@@ -22,12 +22,15 @@ class PromptAndValidationTests(unittest.TestCase):
                 "diplomacy": ["Bo to red: We can trade at dawn."]
             },
             "Share food, stay together, and keep exploring the river path carefully.",
+            "Alive humans in group: 3. Shared carried resources are food=2, wood=1, stone=0. Average pressure is survival=4.0, safety=3.0, belonging=2.0. The group currently has 1 home(s), 0 bridge(s), 0 armed human(s), 0 pregnancy/pending birth state(s), 0 human(s) with urgent survival pressure, and 0 wounded human(s).",
         )
         self.assertIn("You are Ada", prompt)
         self.assertIn("Share food", prompt)
         self.assertIn("shared food", prompt)
         self.assertIn("Built a bridge yesterday", prompt)
         self.assertIn("I found a ford", prompt)
+        self.assertIn("group's current situation", prompt)
+        self.assertIn("Current role in the group", prompt)
         self.assertIn("MOVE_NORTH", prompt)
         self.assertIn("INTERACT", prompt)
 

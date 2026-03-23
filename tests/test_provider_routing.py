@@ -81,6 +81,7 @@ class ProviderRoutingTests(unittest.TestCase):
             memories=[],
             recent_messages={"civilization": [], "diplomacy": []},
             cultural_context="",
+            group_context="Alive humans in group: 1.",
         )
         adapter = RoutingLLMAdapter(
             CivilizationSettings(
@@ -109,6 +110,7 @@ class ProviderRoutingTests(unittest.TestCase):
             memories=[],
             recent_messages={"civilization": [], "diplomacy": []},
             cultural_context="",
+            group_context="Alive humans in group: 1.",
         )
         adapter = OpenCodeCLIAdapter(
             CivilizationProviderConfig(
@@ -149,6 +151,7 @@ class ProviderRoutingTests(unittest.TestCase):
                     memories=[],
                     recent_messages={"civilization": [], "diplomacy": []},
                     cultural_context="Stay close and help each other.",
+                    group_context="Alive humans in group: 2.",
                 )
             )
 
@@ -191,6 +194,7 @@ class ProviderRoutingTests(unittest.TestCase):
             memories=[],
             recent_messages={"civilization": [], "diplomacy": []},
             cultural_context="",
+            group_context="Alive humans in group: 1.",
         )
         adapter = GeminiCLIAdapter(
             CivilizationProviderConfig(provider="gemini-cli", model="gemini-2.5-flash")
