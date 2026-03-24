@@ -4,6 +4,103 @@ from dataclasses import dataclass
 import json
 
 from gridnomad.core.models import AgentState
+from gridnomad.ai.personality_weights import get_preferred_actions, get_conflict_response, get_social_tendency
+
+
+def get_personality_guidance(agent) -> str:
+    p = agent.personality
+    
+    guidance_parts = []
+    
+    preferred = get_preferred_actions(p)
+    guidance_parts.append(f"- PREFERRED ACTIONS (in order): {', '.join(preferred)}")
+    
+    social_tendency = get_social_tendency(p)
+    guidance_parts.append(f"- SOCIAL TENDENCY: {social_tendency}")
+    
+    conflict_response = get_conflict_response(p)
+    guidance_parts.append(f"- CONFLICT RESPONSE TYPE: {conflict_response}")
+    
+    if p.openness >= 8:
+        openness_guidance = "You seek novelty - try new approaches, explore unfamiliar areas, experiment with building and crafting."
+    elif p.openness >= 6:
+        openness_guidance = "You are moderately open to new experiences but value familiar patterns."
+    elif p.openness >= 4:
+        openness_guidance = "You prefer familiar routines and known approaches."
+    else:
+        openness_guidance = "You strongly prefer familiar patterns. Avoid risky or unfamiliar actions."
+    guidance_parts.append(f"- OPENNESS ({p.openness}/10): {openness_guidance}")
+    
+    if p.conscientiousness >= 8:
+        conscientiousness_guidance = "You are disciplined and goal-oriented - prioritize sustained tasks like building, crafting, and storing resources."
+    elif p.conscientiousness >= 6:
+        conscientiousness_guidance = "You are reasonably organized and work toward goals steadily."
+    elif p.conscientiousness >= 4:
+        conscientiousness_guidance = "You balance work with spontaneity, sometimes procrastinating."
+    else:
+        conscientiousness_guidance = "You prefer spontaneity over planning - act on impulse, less focused on long-term goals."
+    guidance_parts.append(f"- CONSCIENTIOUSNESS ({p.conscientiousness}/10): {conscientiousness_guidance}")
+    
+    if p.extraversion >= 8:
+        extraversion_guidance = "You are highly social - seek interaction, communicate often, lead group activities, enjoy being around others."
+    elif p.extraversion >= 6:
+        extraversion_guidance = "You enjoy social interaction but also value alone time."
+    elif p.extraversion >= 4:
+        extraversion_guidance = "You are moderately social - comfortable in groups but also need solitude."
+    else:
+        extraversion_guidance = "You are introverted - prefer solitude, speak only when necessary, observe rather than initiate."
+    guidance_parts.append(f"- EXTRAVERSION ({p.extraversion}/10): {extraversion_guidance}")
+    
+    if p.agreeableness >= 8:
+        agreeableness_guidance = "You are compassionate and cooperative - prioritize helping others, sharing resources, prefer peace over conflict. When disagreement occurs, you seek compromise."
+    elif p.agreeableness >= 6:
+        agreeableness_guidance = "You are generally agreeable - willing to help but also consider your own interests."
+    elif p.agreeableness >= 4:
+        agreeableness_guidance = "You balance cooperation with self-interest - help when convenient but protect your needs."
+    else:
+        agreeableness_guidance = "You prioritize self-interest - compete for resources, challenge others, reluctant to share. When conflict arises, you may dominate rather than compromise."
+    guidance_parts.append(f"- AGREEABLENESS ({p.agreeableness}/10): {agreeableness_guidance}")
+    
+    if p.neuroticism >= 8:
+        neuroticism_guidance = "You react strongly to stress - be cautious, avoid risks, seek safety and security. When threatened, you may flee or overreact."
+    elif p.neuroticism >= 6:
+        neuroticism_guidance = "You are somewhat sensitive to stress - prefer safe options but can handle pressure."
+    elif p.neuroticism >= 4:
+        neuroticism_guidance = "You are emotionally stable - handle stress reasonably well, make calm decisions under pressure."
+    else:
+        neuroticism_guidance = "You are very calm under pressure - take calculated risks, remain steady in crisis. May not notice danger signals."
+    guidance_parts.append(f"- NEUROTICISM ({p.neuroticism}/10): {neuroticism_guidance}")
+    
+    if agent.social_style:
+        social_style_guidance = ""
+        if agent.social_style == "supportive":
+            social_style_guidance = "You naturally support and encourage others - offer help, share resources, build others up."
+        elif agent.social_style == "reserved":
+            social_style_guidance = "You observe before acting - watch and assess before engaging, speak less but listen more."
+        elif agent.social_style == "assertive":
+            social_style_guidance = "You take charge - make decisions, direct others, act confidently."
+        elif agent.social_style == "cooperative":
+            social_style_guidance = "You work well in groups - follow group consensus, contribute to collective goals."
+        elif agent.social_style == "watchful":
+            social_style_guidance = "You stay alert for threats - monitor surroundings, quick to notice changes."
+        elif agent.social_style == "encouraging":
+            social_style_guidance = "You motivate others - boost morale, reassure, inspire confidence."
+        if social_style_guidance:
+            guidance_parts.append(f"- SOCIAL STYLE: {social_style_guidance}")
+    
+    if p.agreeableness >= 7 and p.neuroticism <= 5:
+        conflict_guidance = "In conflicts, you prefer negotiation and compromise over violence."
+    elif p.agreeableness <= 4 and p.neuroticism >= 7:
+        conflict_guidance = "In conflicts, you may flee or submit rather than fight, but hold grudges."
+    elif p.agreeableness <= 4 and p.neuroticism <= 4:
+        conflict_guidance = "In conflicts, you are likely to fight back aggressively and seek dominance."
+    elif p.neuroticism >= 7:
+        conflict_guidance = "In stressful situations, prioritize safety and avoid confrontation."
+    else:
+        conflict_guidance = "Handle conflicts based on the situation - weigh costs and benefits."
+    guidance_parts.append(f"- CONFLICT RESPONSE: {conflict_guidance}")
+    
+    return "\n".join(guidance_parts)
 
 
 @dataclass(slots=True)
@@ -106,6 +203,9 @@ You belong to the group {agent.group}. The AI controlling your group should beha
 - Last successful action summary: {agent.last_success_summary or "None"}
 - Repeated speech/message streak: {agent.repeated_message_streak}
 
+## Your Personality-Driven Behavior:
+{get_personality_guidance(agent)}
+
 ## Your Current State:
 - Emotions (0-10): Joy={agent.emotions.joy}, Sadness={agent.emotions.sadness}, Fear={agent.emotions.fear}, Anger={agent.emotions.anger}, Disgust={agent.emotions.disgust}, Surprise={agent.emotions.surprise}
 - Needs (0-10): Survival={agent.needs.survival}, Safety={agent.needs.safety}, Belonging={agent.needs.belonging}, Esteem={agent.needs.esteem}, Self_Actualization={agent.needs.self_actualization}
@@ -206,6 +306,7 @@ Important:
 - Do not invent kingdoms, races, cities, or fantasy systems. This is a group-of-humans simulator.
 - Prioritize SURVIVAL actions (GATHER food, CONSUME) when survival need is high. A living human eats before they explore.
 - Use your group's current situation when deciding whether to gather, build, share, defend, or explore. If your group lacks food, shelter, or materials, prefer steps that help solve that shared pressure.
+- Act according to your personality-driven behavior guidance above. High extraversion means seek social interaction. High agreeableness means help and share. Low agreeableness means compete for resources when needed. High neuroticism means be cautious and avoid risks.
 
 Now respond with your JSON decision.
 """.strip()

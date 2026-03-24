@@ -3,7 +3,23 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass
 
-from gridnomad.core.models import CulturalInnovation
+from gridnomad.core.models import CulturalInnovation, BigFivePersonality
+
+
+def calculate_innovation_strength(innovation: CulturalInnovation, personality: BigFivePersonality | None) -> int:
+    if personality is None:
+        return innovation.strength
+    
+    modifier = 1.0
+    
+    if personality.openness >= 7:
+        modifier += 0.2
+    if personality.extraversion >= 7:
+        modifier += 0.15
+    if personality.conscientiousness >= 7:
+        modifier += 0.1
+    
+    return int(innovation.strength * modifier)
 
 
 @dataclass(slots=True)
@@ -44,15 +60,19 @@ class CultureStore:
         innovation: CulturalInnovation,
         *,
         origin_agent_id: str | None = None,
+        origin_agent_personality: BigFivePersonality | None = None,
     ) -> None:
         key = (innovation.category, innovation.element.lower())
         existing = self._elements[faction_id].get(key)
+        
+        adjusted_strength = calculate_innovation_strength(innovation, origin_agent_personality)
+        
         if existing is None:
             self._elements[faction_id][key] = CultureElement(
                 category=innovation.category,
                 element=innovation.element,
                 description=innovation.description,
-                strength=innovation.strength,
+                strength=adjusted_strength,
                 origin_agent_id=origin_agent_id,
             )
             return

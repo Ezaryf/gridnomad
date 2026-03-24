@@ -17,12 +17,29 @@ from gridnomad.ai.civilizations import (
     RoutingLLMAdapter,
     build_cli_environment,
 )
-from gridnomad.ai.prompting import AgentMemoryView, AgentPromptView, build_agent_prompt
+from gridnomad.ai.prompting import AgentMemoryView, AgentPromptView, build_agent_prompt, get_personality_guidance
+from gridnomad.ai.personality_weights import (
+    calculate_action_weights,
+    get_action_modifier,
+    get_conflict_response,
+    get_preferred_actions,
+    get_social_tendency,
+    get_resource_tendency,
+    PersonalityActionWeights,
+)
 
 __all__ = [
     "AgentContext",
     "AgentMemoryView",
     "AgentPromptView",
+    "get_personality_guidance",
+    "calculate_action_weights",
+    "get_action_modifier",
+    "get_conflict_response",
+    "get_preferred_actions",
+    "get_social_tendency",
+    "get_resource_tendency",
+    "PersonalityActionWeights",
     "CivilizationProviderConfig",
     "CivilizationSettings",
     "AnthropicAPIAdapter",

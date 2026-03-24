@@ -1,0 +1,28 @@
+{
+  "action": "MOVE_EAST",
+  "target_x": 74,
+  "target_y": 52,
+  "target_agent_id": "group-02-human-12",
+  "reason": "The river is close and Bram is there. Moving east again to reach them.",
+  "intent": "Meet up with Bram and find the river together as promised.",
+  "speach": "Coming through!",
+  "target_resource_kind": "water",
+  "interaction_mode": "support",
+  "desired_distance": 1,
+  "updated_emotions": {
+    "Joy": 5,
+    "Sadness": 1,
+    "Fear": 2,
+    "Anger": 1,
+    "Disgust": 0,
+    "Surprise": 2
+  },
+  "updated_needs": {
+    "Survival": 4,
+    "Safety": 4,
+    "Belonging": 5,
+    "Esteem": 4,
+    "Self_Actualization": 5
+  },
+  "thought": "That blocked tile was frustrating, but the river has to be accessible somehow."
+}

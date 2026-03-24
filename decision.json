@@ -1,16 +1,16 @@
 {
-  "action": "MOVE_SOUTH",
-  "target_x": null,
-  "target_y": null,
+  "action": "MOVE_EAST",
+  "target_x": 41,
+  "target_y": 20,
   "target_agent_id": null,
-  "reason": "The path east got blocked again. I'll go south first to get around and try to reach the river from a different angle.",
-  "intent": "Navigate around the blocked area by moving south, then head toward the river to collect water.",
-  "speech": "That east path keeps blocking me. Let me try going around from the south!",
+  "reason": "The settlement is one tile east and one tile south. I need to keep moving toward it so I'm there when Mara returns from scouting.",
+  "intent": "Continue my journey to the settlement to fulfill my promise to be there when Mara returns.",
+  "speech": "",
   "target_resource_kind": null,
-  "interaction_mode": "observe",
+  "interaction_mode": null,
   "desired_distance": null,
   "updated_emotions": {
-    "Joy": 4,
+    "Joy": 5,
     "Sadness": 1,
     "Fear": 2,
     "Anger": 1,
@@ -18,11 +18,11 @@
     "Surprise": 2
   },
   "updated_needs": {
-    "Survival": 4,
+    "Survival": 5,
     "Safety": 4,
-    "Belonging": 5,
-    "Esteem": 4,
+    "Belonging": 7,
+    "Esteem": 5,
     "Self_Actualization": 5
   },
-  "thought": "Getting blocked twice is frustrating. But the river's still there — I'll find another way."
+  "thought": "Almost there. Mara's counting on me. One more step."
 }

@@ -1,0 +1,28 @@
+{
+  "action": "MOVE_SOUTH",
+  "target_x": 57,
+  "target_y": 29,
+  "target_agent_id": "group-02-human-01",
+  "reason": "Mara is literally one tile south. I've been overcomplicating this. Just go.",
+  "intent": "Finally reach Mara directly without any detours.",
+  "speech": "Here I come, Mara!",
+  "target_resource_kind": null,
+  "interaction_mode": null,
+  "desired_distance": 1,
+  "updated_emotions": {
+    "Joy": 6,
+    "Sadness": 1,
+    "Fear": 2,
+    "Anger": 1,
+    "Disgust": 0,
+    "Surprise": 2
+  },
+  "updated_needs": {
+    "Survival": 5,
+    "Safety": 3,
+    "Belonging": 7,
+    "Esteem": 4,
+    "Self_Actualization": 5
+  },
+  "thought": "She's right there. This time I'm just going south. No bridge. No detour. Just south."
+}

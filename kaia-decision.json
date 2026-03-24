@@ -1,0 +1,28 @@
+{
+  "action": "MOVE_NORTH",
+  "target_x": 60,
+  "target_y": 99,
+  "target_agent_id": "group-02-human-16",
+  "reason": "I've been hitting walls trying to reach Mina. She's 1 tile north - let me try moving north again since the blocked tiles might have cleared or there's a different path.",
+  "intent": "Finally get face-to-face with Mina so we can figure out what's blocking our path together.",
+  "speech": "",
+  "target_resource_kind": null,
+  "interaction_mode": "support",
+  "desired_distance": 1,
+  "updated_emotions": {
+    "Joy": 2,
+    "Sadness": 1,
+    "Fear": 1,
+    "Anger": 3,
+    "Disgust": 0,
+    "Surprise": 2
+  },
+  "updated_needs": {
+    "Survival": 5,
+    "Safety": 5,
+    "Belonging": 7,
+    "Esteem": 4,
+    "Self_Actualization": 5
+  },
+  "thought": "Those blocked tiles are pissing me off. One more try northward - if that fails, I'll try a completely different route."
+}

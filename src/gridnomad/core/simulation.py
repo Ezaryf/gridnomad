@@ -8,6 +8,7 @@ from pathlib import Path
 
 from gridnomad.ai.adapters import AgentContext, LLMAdapter, build_agent_context, parse_decision_payload
 from gridnomad.ai.civilizations import ProviderDecisionError
+from gridnomad.ai.personality_weights import get_action_modifier
 from gridnomad.core.actions import ActionRegistry, MODEL_ACTIONS, MOVE_DELTAS
 from gridnomad.core.culture import CultureStore
 from gridnomad.core.memory import MemoryStore
@@ -887,13 +888,31 @@ class Simulation:
         if abs(target.x - actor.x) + abs(target.y - actor.y) > 1:
             actor.last_action_success = False
             return self._event("INTERACT", f"{actor.name} is too far from {target.name} and needs another model decision to close the distance.", False, actor.id, faction_id=actor.faction_id)
+        
+        actor_extraversion = actor.personality.extraversion
+        target_extraversion = target.personality.extraversion
+        actor_agreeableness = actor.personality.agreeableness
+        target_agreeableness = target.personality.agreeableness
+        
+        bond_modifier = 1.0
+        if actor_extraversion >= 7:
+            bond_modifier += 0.3
+        if target_extraversion >= 7:
+            bond_modifier += 0.3
+        if actor_agreeableness >= 7:
+            bond_modifier += 0.2
+        if target_agreeableness >= 7:
+            bond_modifier += 0.2
+        
+        bond_amount = max(1, int(bond_modifier))
+        
         actor.needs.belonging = max(0, actor.needs.belonging - 2)
         actor.needs.safety = max(0, actor.needs.safety - 1)
         target.needs.belonging = max(0, target.needs.belonging - 2)
         target.needs.safety = max(0, target.needs.safety - 1)
-        metadata = {"intent": decision.intent, "interaction_mode": decision.interaction_mode or "social"}
+        metadata = {"intent": decision.intent, "interaction_mode": decision.interaction_mode or "social", "bond_modifier": bond_modifier}
         if actor.faction_id == target.faction_id:
-            bond_strength = self._increase_bond(actor, target, amount=1)
+            bond_strength = self._increase_bond(actor, target, amount=bond_amount)
             metadata["bond_strength"] = bond_strength
             if actor.bonded_partner_id == target.id:
                 metadata["bonded"] = True
@@ -916,7 +935,15 @@ class Simulation:
         if abs(target.x - actor.x) + abs(target.y - actor.y) > 1:
             actor.last_action_success = False
             return self._event("ATTACK", f"{actor.name} is too far from {target.name} to attack.", False, actor.id, faction_id=actor.faction_id)
-        damage = 2 + (2 if actor.weapon_kind == "crafted" else 0)
+        
+        base_damage = 2 + (2 if actor.weapon_kind == "crafted" else 0)
+        
+        attack_modifier = get_action_modifier("attack", actor.personality)
+        damage = int(base_damage * attack_modifier)
+        
+        defense_modifier = get_action_modifier("flee", target.personality)
+        damage = int(damage * max(0.5, 1.0 - (defense_modifier - 1.0) * 0.3))
+        
         target.health = max(0, target.health - damage)
         actor.last_action_success = True
         metadata = {
@@ -924,6 +951,14 @@ class Simulation:
             "damage": damage,
             "weapon_kind": actor.weapon_kind or "none",
             "interaction_mode": decision.interaction_mode or "hostile",
+            "attacker_personality": {
+                "agreeableness": actor.personality.agreeableness,
+                "neuroticism": actor.personality.neuroticism,
+            },
+            "defender_personality": {
+                "agreeableness": target.personality.agreeableness,
+                "neuroticism": target.personality.neuroticism,
+            },
         }
         if target.health == 0:
             target.alive = False
@@ -1222,6 +1257,13 @@ class Simulation:
         spawn_x, spawn_y = self._find_spawn_near(structure.x, structure.y)
         if spawn_x is None or spawn_y is None:
             return None
+        
+        openness = self._inherit_trait(carrier.personality.openness, partner.personality.openness if partner else None)
+        conscientiousness = self._inherit_trait(carrier.personality.conscientiousness, partner.personality.conscientiousness if partner else None)
+        extraversion = self._inherit_trait(carrier.personality.extraversion, partner.personality.extraversion if partner else None)
+        agreeableness = self._inherit_trait(carrier.personality.agreeableness, partner.personality.agreeableness if partner else None)
+        neuroticism = self._inherit_trait(carrier.personality.neuroticism, partner.personality.neuroticism if partner else None)
+        
         newborn_id = self._next_agent_id(carrier.faction_id)
         newborn_name = self._next_unique_name()
         newborn = AgentState(
@@ -1231,11 +1273,11 @@ class Simulation:
             x=spawn_x,
             y=spawn_y,
             personality=BigFivePersonality(
-                openness=self.rng.randint(4, 8),
-                conscientiousness=self.rng.randint(4, 8),
-                extraversion=self.rng.randint(3, 7),
-                agreeableness=self.rng.randint(4, 8),
-                neuroticism=self.rng.randint(2, 6),
+                openness=openness,
+                conscientiousness=conscientiousness,
+                extraversion=extraversion,
+                agreeableness=agreeableness,
+                neuroticism=neuroticism,
             ),
             emotions=Emotions(joy=6, sadness=0, fear=1, anger=0, disgust=0, surprise=5),
             needs=Needs(survival=3, safety=2, belonging=2, esteem=1, self_actualization=1),
@@ -1279,6 +1321,17 @@ class Simulation:
             if candidate not in self.world.agents:
                 return candidate
             slot += 1
+
+    def _inherit_trait(self, parent1_trait: int, parent2_trait: int | None) -> int:
+        if parent2_trait is None:
+            base = parent1_trait
+        else:
+            base = (parent1_trait + parent2_trait) // 2
+        
+        variation = self.rng.randint(-2, 2)
+        inherited = base + variation
+        
+        return max(0, min(10, inherited))
 
     def _next_unique_name(self) -> str:
         used = {agent.name.strip().lower() for agent in self.world.agents.values() if agent.name.strip()}

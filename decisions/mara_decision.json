@@ -1,0 +1,28 @@
+{
+  "action": "MOVE_WEST",
+  "target_x": null,
+  "target_y": null,
+  "target_agent_id": null,
+  "reason": "The bridge lagoons are visible 1-2 tiles west. I need to actually reach and cross them to continue my westward exploration.",
+  "intent": "Keep pushing west toward the bridge crossing to continue exploring.",
+  "speech": null,
+  "target_resource_kind": null,
+  "interaction_mode": null,
+  "desired_distance": null,
+  "updated_emotions": {
+    "Joy": 2,
+    "Sadness": 2,
+    "Fear": 2,
+    "Anger": 2,
+    "Disgust": 0,
+    "Surprise": 1
+  },
+  "updated_needs": {
+    "Survival": 5,
+    "Safety": 4,
+    "Belonging": 5,
+    "Esteem": 4,
+    "Self_Actualization": 5
+  },
+  "thought": "The bridge is right there. I just need to keep moving west and not give up."
+}
