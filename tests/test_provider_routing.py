@@ -129,6 +129,8 @@ class ProviderRoutingTests(unittest.TestCase):
             adapter.decide(context)
 
         command = mocked_run.call_args.args[0]
+        self.assertIn("--title", command)
+        self.assertIn("GridNomad simulation", command)
         self.assertIn("--provider", command)
         self.assertIn("openrouter", command)
         self.assertIn("-m", command)
@@ -180,6 +182,74 @@ class ProviderRoutingTests(unittest.TestCase):
         self.assertIn("opencode", command[0])
         self.assertEqual(set(decisions.keys()), {"ada", "bo"})
         self.assertEqual(decisions["bo"].action, "REST")
+
+    def test_opencode_adapter_surfaces_ndjson_error_message(self) -> None:
+        agent = build_agent("ada", "red", 1, 1)
+        _, world, _ = build_world(agents=[agent])
+        perception = build_perception(world, agent, 2)
+        context = build_agent_context(
+            tick=0,
+            agent=agent,
+            world=world,
+            perception=perception,
+            recent_events=[],
+            memories=[],
+            recent_messages={"civilization": [], "diplomacy": []},
+            cultural_context="",
+            group_context="Alive humans in group: 1.",
+        )
+        adapter = OpenCodeCLIAdapter(
+            CivilizationProviderConfig(
+                provider="opencode",
+                model="opencode/minimax-m2.5-free",
+            )
+        )
+
+        class Completed:
+            returncode = 1
+            stdout = '{"type":"error","error":{"data":{"message":"Error: Unable to connect. Is the computer able to access the url?"}}}'
+            stderr = ""
+
+        with patch("gridnomad.ai.civilizations.subprocess.run", return_value=Completed()):
+            with self.assertRaises(RuntimeError) as raised:
+                adapter.decide(context)
+
+        self.assertIn("Unable to connect", str(raised.exception))
+
+    def test_opencode_adapter_extracts_json_from_ndjson_output(self) -> None:
+        agent = build_agent("ada", "red", 1, 1)
+        _, world, _ = build_world(agents=[agent])
+        perception = build_perception(world, agent, 2)
+        context = build_agent_context(
+            tick=0,
+            agent=agent,
+            world=world,
+            perception=perception,
+            recent_events=[],
+            memories=[],
+            recent_messages={"civilization": [], "diplomacy": []},
+            cultural_context="",
+            group_context="Alive humans in group: 1.",
+        )
+        adapter = OpenCodeCLIAdapter(
+            CivilizationProviderConfig(
+                provider="opencode",
+                model="opencode/minimax-m2.5-free",
+            )
+        )
+
+        class Completed:
+            returncode = 0
+            stdout = '\n'.join([
+                '{"type":"session.started","sessionID":"abc"}',
+                '{"type":"assistant","message":{"content":[{"type":"text","text":"{\\"action\\":\\"MOVE_NORTH\\",\\"target_x\\":null,\\"target_y\\":null,\\"reason\\":\\"test\\",\\"updated_emotions\\":{\\"Joy\\":4,\\"Sadness\\":1,\\"Fear\\":1,\\"Anger\\":0,\\"Disgust\\":0,\\"Surprise\\":1},\\"updated_needs\\":{\\"Survival\\":4,\\"Safety\\":4,\\"Belonging\\":4,\\"Esteem\\":4,\\"Self_Actualization\\":4},\\"thought\\":\\"test\\"}"}]}}'
+            ])
+            stderr = ""
+
+        with patch("gridnomad.ai.civilizations.subprocess.run", return_value=Completed()):
+            output = adapter.decide(context)
+
+        self.assertIn('"action":"MOVE_NORTH"', output.replace(" ", ""))
 
     def test_gemini_cli_prefers_explicit_windows_wrapper(self) -> None:
         agent = build_agent("ada", "red", 1, 1)

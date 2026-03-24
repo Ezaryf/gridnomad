@@ -52,6 +52,71 @@ def _clean_cli_output(output: str) -> str:
     return text
 
 
+def _extract_ndjson_error(output: str) -> str:
+    stripped = ANSI_PATTERN.sub("", output or "").strip()
+    for line in stripped.splitlines():
+        line = line.strip()
+        if not line or not line.startswith("{"):
+            continue
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if payload.get("type") != "error":
+            continue
+        error_payload = payload.get("error") or {}
+        message = (
+            error_payload.get("data", {}).get("message")
+            or error_payload.get("message")
+            or payload.get("message")
+            or ""
+        )
+        if message:
+            return str(message).strip()
+    return ""
+
+
+def _recursive_string_values(value: Any) -> list[str]:
+    results: list[str] = []
+    if isinstance(value, str):
+        results.append(value)
+    elif isinstance(value, dict):
+        for item in value.values():
+            results.extend(_recursive_string_values(item))
+    elif isinstance(value, list):
+        for item in value:
+            results.extend(_recursive_string_values(item))
+    return results
+
+
+def _extract_opencode_response(output: str) -> str:
+    stripped = ANSI_PATTERN.sub("", output or "").strip()
+    if not stripped:
+        return ""
+    if not stripped.startswith("{"):
+        return _clean_cli_output(stripped)
+
+    candidate_texts: list[str] = []
+    for line in stripped.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if payload.get("type") == "error":
+            continue
+        candidate_texts.extend(_recursive_string_values(payload))
+
+    for candidate in candidate_texts:
+        cleaned = _clean_cli_output(candidate)
+        if cleaned.startswith("{") and cleaned.endswith("}"):
+            return cleaned
+
+    return _clean_cli_output(stripped)
+
+
 def build_cli_environment(cli_home: str | None = None, extra: dict[str, str] | None = None) -> dict[str, str]:
     env = os.environ.copy()
     if cli_home:
@@ -383,9 +448,14 @@ class OpenCodeCLIAdapter:
     def __init__(self, config: CivilizationProviderConfig, *, project_dir: Path | None = None) -> None:
         self.config = config
         self.project_dir = Path(project_dir or Path.cwd()).resolve()
+        self._command_prefix: list[str] | None = None
+        self._resolved_command: str | None = None
 
     def _command_base(self) -> list[str]:
-        command = ["opencode", "run", "--dir", str(self.project_dir)]
+        if self._command_prefix is None or self._resolved_command is None:
+            self._command_prefix, self._resolved_command = _resolve_cli_command("opencode")
+        command = list(self._command_prefix)
+        command.extend(["run", "--dir", str(self.project_dir), "--format", "json", "--title", "GridNomad simulation"])
         if self.config.opencode_provider:
             command.extend(["--provider", self.config.opencode_provider])
         if self.config.model:
@@ -407,10 +477,17 @@ class OpenCodeCLIAdapter:
             timeout=self.config.timeout_seconds,
             check=False,
         )
-        output = completed.stdout.strip() or completed.stderr.strip()
-        if completed.returncode != 0 and completed.stdout.strip() == "":
-            raise RuntimeError(output)
-        return _clean_cli_output(output)
+        combined_output = "\n".join(part for part in [completed.stdout, completed.stderr] if part).strip()
+        error_message = _extract_ndjson_error(combined_output)
+        if error_message:
+            raise RuntimeError(error_message)
+        output = _extract_opencode_response(completed.stdout)
+        if completed.returncode != 0 and not output:
+            resolved_hint = f" via {self._resolved_command}" if self._resolved_command else ""
+            raise RuntimeError((combined_output or "OpenCode returned no usable output.").strip() + resolved_hint)
+        if not output:
+            raise RuntimeError("OpenCode returned no usable assistant response.")
+        return output
 
     def decide(self, agent_context: AgentContext) -> str:
         return self._run_prompt(agent_context.prompt)

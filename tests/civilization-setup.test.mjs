@@ -143,9 +143,12 @@ test("opencode groups default to batch execution and humans gain personas", () =
 });
 
 
-test("opencode readiness blocks groups without a managed home", () => {
-  const readiness = controllerReadiness({ provider: "opencode", model: "opencode/minimax-m2.5-free" }, null);
-  assert.equal(readiness.state, "home_required");
+test("opencode readiness can use the user-global environment without a managed home", () => {
+  const readiness = controllerReadiness(
+    { provider: "opencode", model: "google/gemini-2.5-flash" },
+    { health_state: "ready" }
+  );
+  assert.equal(readiness.state, "ready");
 });
 
 
