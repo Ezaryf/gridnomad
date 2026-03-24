@@ -68,7 +68,8 @@ export async function GET(request) {
   if (provider === "opencode") {
     const credential = url.searchParams.get("credential") ?? "";
     const cliHome = url.searchParams.get("cliHome") ?? "";
-    const inspection = await inspectOpencode({ credential, cliHome });
+    const model = url.searchParams.get("model") ?? "";
+    const inspection = await inspectOpencode({ credential, cliHome, model });
     return NextResponse.json({
       ...inspection,
       supports_model_listing: true,

@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
-import { KeyRound, Plus, Settings2, UserRoundCog } from "lucide-react";
+import { KeyRound, Plus, Search, Settings2, UserRoundCog } from "lucide-react";
 
 import {
   controllerReadiness,
@@ -49,6 +49,7 @@ export default function CivilizationSettingsSheet({
   onRefreshProviderCatalog,
   onProviderChange,
   onProviderCredentialChange,
+  onProviderModelChange,
   onLaunchProviderLogin,
   onCreateOpencodeHome,
   onCopyCommand,
@@ -218,10 +219,12 @@ export default function CivilizationSettingsSheet({
                         onRefreshProviderCatalog={(provider, credential = "") => onRefreshProviderCatalog("group", group.id, provider, {
                           credential,
                           cliHome: group.controller?.cliHome ?? "",
-                          googleCloudProject: group.controller?.googleCloudProject ?? ""
+                          googleCloudProject: group.controller?.googleCloudProject ?? "",
+                          model: group.controller?.model ?? "",
                         })}
                         onProviderChange={(provider) => onProviderChange(group.id, provider)}
                         onCredentialChange={(credential) => onProviderCredentialChange(group.id, credential)}
+                        onModelChange={(model) => onProviderModelChange(group.id, model)}
                         onUpdateController={(patch) => onUpdateGroupController(group.id, patch)}
                         onLaunchProviderLogin={onLaunchProviderLogin}
                         onCreateOpencodeHome={() => onCreateOpencodeHome(group.id)}
@@ -267,17 +270,24 @@ function ControllerCard({
   onRefreshProviderCatalog,
   onProviderChange,
   onCredentialChange,
+  onModelChange,
   onUpdateController,
   onLaunchProviderLogin,
   onCreateOpencodeHome,
   onCopyCommand
 }) {
   const provider = controller?.provider ?? "heuristic";
-  const models = catalog?.models?.length ? catalog.models : controller?.availableModels ?? [];
-  const credentials = catalog?.credentials ?? [];
-  const healthState = catalog?.health_state ?? catalog?.auth_status ?? "local";
+  const effectiveCatalog = catalog?.provider === provider || !catalog?.provider ? catalog : null;
+  const models = effectiveCatalog?.models?.length ? effectiveCatalog.models : controller?.availableModels ?? [];
+  const modelEntries = effectiveCatalog?.model_entries ?? [];
+  const credentials = effectiveCatalog?.credentials ?? [];
+  const healthState = effectiveCatalog?.health_state ?? effectiveCatalog?.auth_status ?? "local";
   const needsOpencodeLogin = provider === "opencode" && (healthState === "login_required" || healthState === "connected_no_models");
-  const readiness = controllerReadiness(controller, catalog);
+  const readiness = controllerReadiness(controller, effectiveCatalog);
+  const setupGuide = describeControllerSetup(provider, readiness.state, effectiveCatalog);
+  const showAdvancedCatalog = Boolean(effectiveCatalog?.stdout || effectiveCatalog?.stderr || effectiveCatalog?.manual_commands?.powershell?.login);
+  const [modelQuery, setModelQuery] = useState("");
+  const selectedModel = controller?.model ?? "";
 
   return (
     <div className="space-y-4">
@@ -288,16 +298,17 @@ function ControllerCard({
         </div>
         <div className="flex flex-col items-end gap-1">
           <Badge variant="muted">{providerDisplayName(provider)}</Badge>
-          <Badge variant="default" className={readiness.state === "ready" ? "text-[10px]" : "border-red-500/40 bg-red-500/10 text-[10px] text-red-200"}>{readiness.state}</Badge>
-          {provider === "opencode" ? <Badge variant="outline" className="text-[10px]">{healthState}</Badge> : null}
+          <Badge variant="default" className={readiness.state === "ready" ? "text-[10px]" : "border-red-500/40 bg-red-500/10 text-[10px] text-red-200"}>{formatReadinessState(readiness.state)}</Badge>
         </div>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="sm:col-span-2 rounded-xl border border-white/10 bg-white/[0.03] p-3 text-xs leading-5 text-zinc-400">
-          <p className="font-medium text-zinc-200">Strict readiness: {readiness.state}</p>
-          <p>{readiness.message}</p>
+          <p className="font-medium text-zinc-200">{setupGuide.title}</p>
+          <p>{setupGuide.description}</p>
+          {setupGuide.detail ? <p className="mt-1 text-zinc-500">{setupGuide.detail}</p> : null}
         </div>
+
         <LabeledField label="Provider">
           <Select value={provider} onValueChange={onProviderChange}>
             <SelectTrigger><SelectValue /></SelectTrigger>
@@ -309,32 +320,90 @@ function ControllerCard({
           </Select>
         </LabeledField>
 
-        <LabeledField label="Model">
-          <Select value={controller?.model || "__empty__"} onValueChange={(value) => onUpdateController({ model: value === "__empty__" ? "" : value })}>
-            <SelectTrigger><SelectValue placeholder="Choose a model" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__empty__">Automatic / none</SelectItem>
-              {models.map((model) => (
-                <SelectItem key={model} value={model}>{model}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </LabeledField>
-
         {provider === "opencode" ? (
           <>
-            <div className="sm:col-span-2 rounded-xl border border-white/10 bg-white/[0.03] p-3 text-xs leading-5 text-zinc-400">
-              <p className="font-medium text-zinc-200">OpenCode health: {healthState}</p>
-              <p>{catalog?.login_hint ?? "Create a managed OpenCode home, run the manual login command, then refresh credentials and models."}</p>
-              {catalog?.environment_source ? <p className="mt-1 text-zinc-500">Environment: {catalog.environment_source === "managed-home" ? "GridNomad-managed OpenCode home" : catalog.environment_source === "custom-home" ? "Custom OpenCode home" : "User-global OpenCode home"}</p> : null}
-              {catalog?.resolved_cli_home ? <p className="mt-1 text-zinc-500">Home root: {catalog.resolved_cli_home}</p> : null}
-              {catalog?.detected_cli_home ? <p className="mt-1 text-zinc-500">CLI config: {catalog.detected_cli_home}</p> : null}
-              {catalog?.opencode_path ? <p className="mt-1 text-zinc-500">CLI executable: {catalog.opencode_path}</p> : null}
-              {catalog?.models_scope ? <p className="mt-1 text-zinc-500">Models scope: {catalog.models_scope}</p> : null}
-              {needsOpencodeLogin ? <p className="mt-1 text-amber-300">Login is still required before this group can actually run on OpenCode, even if the CLI already exposes model names below.</p> : null}
-              {catalog?.last_probe_at ? <p className="mt-1 text-zinc-500">Last probe: {catalog.last_probe_at}</p> : null}
+            <div className="sm:col-span-2 rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-zinc-100">OpenCode wizard</p>
+                  <p className="mt-1 text-xs leading-5 text-zinc-400">{setupGuide.description}</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline" className="text-[10px]">
+                    {effectiveCatalog?.environment_source === "managed-home" ? "isolated home" : "user-global home"}
+                  </Badge>
+                  <Badge variant={readiness.state === "ready" ? "default" : "outline"} className={readiness.state === "ready" ? "text-[10px]" : "border-amber-500/30 bg-amber-500/10 text-[10px] text-amber-100"}>
+                    {formatOpenCodeStatus(readiness.state)}
+                  </Badge>
+                </div>
+              </div>
+              <div className="mt-4 grid gap-3 md:grid-cols-4">
+                <WizardStep
+                  label="1. Connect"
+                  active={["login_required", "not_installed"].includes(readiness.state)}
+                  complete={!["login_required", "not_installed"].includes(readiness.state)}
+                  text={effectiveCatalog?.environment_source === "managed-home" ? "Using isolated OpenCode home." : "Using user-global OpenCode home."}
+                />
+                <WizardStep
+                  label="2. Choose model"
+                  active={!selectedModel}
+                  complete={Boolean(selectedModel)}
+                  text={selectedModel ? buildOpencodeModelLabel(selectedModel) : "Pick a hosted or provider-backed model."}
+                />
+                <WizardStep
+                  label="3. Verify runtime"
+                  active={Boolean(selectedModel) && readiness.state !== "ready"}
+                  complete={readiness.state === "ready"}
+                  text={effectiveCatalog?.selected_model_status ? formatOpenCodeStatus(effectiveCatalog.selected_model_status) : "Run a smoke prompt against the selected model."}
+                />
+                <WizardStep
+                  label="4. Ready"
+                  active={readiness.state === "ready"}
+                  complete={readiness.state === "ready"}
+                  text={readiness.state === "ready" ? "This group can run now." : "Run stays blocked until the selected model is verified."}
+                />
+              </div>
+              <div className="mt-4 flex flex-wrap items-center gap-2">
+                {readiness.state === "login_required" ? (
+                  <Button
+                    onClick={() => onCopyCommand("OpenCode login command", effectiveCatalog?.manual_commands?.powershell?.login ?? "")}
+                    disabled={!effectiveCatalog?.manual_commands?.powershell?.login}
+                  >
+                    <KeyRound className="size-4" />
+                    Copy login command
+                  </Button>
+                ) : null}
+                {selectedModel && readiness.state !== "ready" ? (
+                  <Button onClick={() => onRefreshProviderCatalog("opencode", controller?.opencodeProvider ?? "")}>
+                    Verify {buildOpencodeModelLabel(selectedModel)}
+                  </Button>
+                ) : null}
+                <Button variant="outline" onClick={() => onRefreshProviderCatalog("opencode", controller?.opencodeProvider ?? "")}>Refresh OpenCode</Button>
+                <Button variant="ghost" onClick={onCreateOpencodeHome}>Use isolated home</Button>
+              </div>
+              <div className="mt-3 text-xs leading-5 text-zinc-500">
+                {effectiveCatalog?.login_hint ?? "Use your user-global OpenCode account or create an isolated OpenCode home if you want GridNomad to use a separate OpenCode environment."}
+              </div>
+              {effectiveCatalog?.selected_model_error_category ? (
+                <div className="mt-3 rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-100">
+                  {formatSelectedModelError(effectiveCatalog.selected_model_error_category, effectiveCatalog?.decision_probe?.error)}
+                </div>
+              ) : null}
             </div>
-            <LabeledField label="OpenCode credential">
+            <div className="sm:col-span-2">
+              <ModelChooser
+                label="Choose model"
+                provider={provider}
+                models={models}
+                modelEntries={modelEntries}
+                value={selectedModel}
+                query={modelQuery}
+                onQueryChange={setModelQuery}
+                onSelect={onModelChange}
+              />
+            </div>
+            {credentials.length > 0 ? (
+            <LabeledField label="Credential">
               <Select value={controller?.opencodeProvider || "__empty__"} onValueChange={(value) => onCredentialChange(value === "__empty__" ? "" : value)}>
                 <SelectTrigger><SelectValue placeholder="Choose credential" /></SelectTrigger>
                 <SelectContent>
@@ -345,62 +414,33 @@ function ControllerCard({
                 </SelectContent>
               </Select>
             </LabeledField>
-            <div className="flex flex-wrap items-end gap-2 sm:col-span-2">
-              <Button variant="outline" onClick={onCreateOpencodeHome}>
-                Create / reset OpenCode home
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => onCopyCommand("OpenCode login command", catalog?.manual_commands?.powershell?.login ?? "")}
-                disabled={!catalog?.manual_commands?.powershell?.login}
-              >
-                <KeyRound className="size-4" />
-                Copy login command
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => onCopyCommand("OpenCode verify command", catalog?.manual_commands?.powershell?.verify ?? "")}
-                disabled={!catalog?.manual_commands?.powershell?.verify}
-              >
-                Copy verify command
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => onCopyCommand("OpenCode models command", catalog?.manual_commands?.powershell?.models ?? "")}
-                disabled={!catalog?.manual_commands?.powershell?.models}
-              >
-                Copy models command
-              </Button>
-              <Button variant="outline" onClick={() => onRefreshProviderCatalog("opencode", controller?.opencodeProvider ?? "")}>Refresh credentials</Button>
-              <Button variant="outline" onClick={() => onRefreshProviderCatalog("opencode", controller?.opencodeProvider ?? "")}>Refresh models</Button>
-            </div>
-            {catalog?.manual_commands?.powershell?.login ? (
-              <div className="sm:col-span-2 rounded-xl border border-white/10 bg-black/30 p-3">
-                <p className="mb-2 text-[10px] uppercase tracking-[0.18em] text-zinc-500">Manual login flow</p>
+            ) : null}
+            {showAdvancedCatalog ? (
+              <details className="sm:col-span-2 rounded-xl border border-white/10 bg-black/30 p-3 text-xs text-zinc-400">
+                <summary className="cursor-pointer text-zinc-200">Advanced OpenCode details</summary>
+                {effectiveCatalog?.manual_commands?.powershell?.login ? (
+                <div className="mt-3">
                 <p className="mb-2 text-xs leading-5 text-zinc-400">
-                  1. Create or reset the managed home. 2. Copy the login command and run it in your own PowerShell or Command Prompt. 3. Finish the browser/device login. 4. Return here and refresh credentials, then models.
+                  Default setup uses your user-global OpenCode account. If you want an isolated account cache just for GridNomad, create an isolated home, run the copied login command in your own terminal, finish login, then refresh.
                 </p>
                 <div className="grid gap-2 md:grid-cols-2">
-                  <InlineCommand label="PowerShell login" value={catalog.manual_commands.powershell.login} />
-                  <InlineCommand label="Command Prompt login" value={catalog.manual_commands.cmd?.login ?? ""} />
-                  <InlineCommand label="Verify auth" value={catalog.manual_commands.powershell.verify} />
-                  <InlineCommand label="List models" value={catalog.manual_commands.powershell.models} />
+                  <InlineCommand label="PowerShell login" value={effectiveCatalog.manual_commands.powershell.login} />
+                  <InlineCommand label="Command Prompt login" value={effectiveCatalog.manual_commands.cmd?.login ?? ""} />
+                  <InlineCommand label="Verify auth" value={effectiveCatalog.manual_commands.powershell.verify} />
+                  <InlineCommand label="List models" value={effectiveCatalog.manual_commands.powershell.models} />
                 </div>
-              </div>
-            ) : null}
-            {(catalog?.stdout || catalog?.stderr) ? (
-              <details className="sm:col-span-2 rounded-xl border border-white/10 bg-black/30 p-3 text-xs text-zinc-400">
-                <summary className="cursor-pointer text-zinc-200">Raw OpenCode probe output</summary>
-                {catalog?.stdout ? (
+                </div>
+                ) : null}
+                {effectiveCatalog?.stdout ? (
                   <div className="mt-3">
                     <p className="mb-1 text-[10px] uppercase tracking-[0.18em] text-zinc-500">Stdout</p>
-                    <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-[10px] leading-4 text-zinc-300">{catalog.stdout}</pre>
+                    <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-[10px] leading-4 text-zinc-300">{effectiveCatalog.stdout}</pre>
                   </div>
                 ) : null}
-                {catalog?.stderr ? (
+                {effectiveCatalog?.stderr ? (
                   <div className="mt-3">
                     <p className="mb-1 text-[10px] uppercase tracking-[0.18em] text-zinc-500">Stderr</p>
-                    <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-[10px] leading-4 text-zinc-300">{catalog.stderr}</pre>
+                    <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-[10px] leading-4 text-zinc-300">{effectiveCatalog.stderr}</pre>
                   </div>
                 ) : null}
               </details>
@@ -411,57 +451,55 @@ function ControllerCard({
         {provider === "gemini-cli" ? (
           <>
             <div className="sm:col-span-2 rounded-xl border border-white/10 bg-white/[0.03] p-3 text-xs leading-5 text-zinc-400">
-              <p className="font-medium text-zinc-200">Gemini CLI health: {catalog?.health_state ?? catalog?.auth_status ?? "login_required"}</p>
-              <p>{catalog?.login_hint ?? "Use your Google account in Gemini CLI, then refresh status and models."}</p>
-              {catalog?.gemini_path ? <p className="mt-1 text-zinc-500">CLI executable: {catalog.gemini_path}</p> : null}
-              {catalog?.resolved_cli_home ? <p className="mt-1 text-zinc-500">User-global home: {catalog.resolved_cli_home}</p> : null}
+              <p className="font-medium text-zinc-200">Gemini CLI status: {formatReadinessState(healthState)}</p>
+              <p>{effectiveCatalog?.login_hint ?? "Use your Google account in Gemini CLI, then refresh status and models."}</p>
+              {effectiveCatalog?.gemini_path ? <p className="mt-1 text-zinc-500">CLI executable: {effectiveCatalog.gemini_path}</p> : null}
+              {effectiveCatalog?.resolved_cli_home ? <p className="mt-1 text-zinc-500">User-global home: {effectiveCatalog.resolved_cli_home}</p> : null}
               {controller?.googleCloudProject ? <p className="mt-1 text-zinc-500">Google Cloud Project: {controller.googleCloudProject}</p> : null}
             </div>
             <div className="flex flex-wrap items-end gap-2 sm:col-span-2">
               <Button
                 variant="outline"
-                onClick={() => onCopyCommand("Gemini CLI login command", catalog?.manual_commands?.powershell?.login ?? "")}
-                disabled={!catalog?.manual_commands?.powershell?.login}
+                onClick={() => onCopyCommand("Gemini CLI login command", effectiveCatalog?.manual_commands?.powershell?.login ?? "")}
+                disabled={!effectiveCatalog?.manual_commands?.powershell?.login}
               >
                 <KeyRound className="size-4" />
                 Copy login command
               </Button>
               <Button
                 variant="outline"
-                onClick={() => onCopyCommand("Gemini CLI verify command", catalog?.manual_commands?.powershell?.verify ?? "")}
-                disabled={!catalog?.manual_commands?.powershell?.verify}
+                onClick={() => onCopyCommand("Gemini CLI verify command", effectiveCatalog?.manual_commands?.powershell?.verify ?? "")}
+                disabled={!effectiveCatalog?.manual_commands?.powershell?.verify}
               >
                 Copy verify command
               </Button>
-              <Button variant="outline" onClick={() => onRefreshProviderCatalog("gemini-cli", "")}>Refresh status</Button>
-              <Button variant="outline" onClick={() => onRefreshProviderCatalog("gemini-cli", "")}>Refresh models</Button>
+              <Button variant="outline" onClick={() => onRefreshProviderCatalog("gemini-cli", "")}>Refresh Gemini CLI</Button>
             </div>
-            {catalog?.manual_commands?.powershell?.login ? (
-              <div className="sm:col-span-2 rounded-xl border border-white/10 bg-black/30 p-3">
-                <p className="mb-2 text-[10px] uppercase tracking-[0.18em] text-zinc-500">Manual Gemini CLI login</p>
+            {showAdvancedCatalog ? (
+              <details className="sm:col-span-2 rounded-xl border border-white/10 bg-black/30 p-3 text-xs text-zinc-400">
+                <summary className="cursor-pointer text-zinc-200">Advanced Gemini CLI details</summary>
+                {effectiveCatalog?.manual_commands?.powershell?.login ? (
+                <div className="mt-3">
                 <p className="mb-2 text-xs leading-5 text-zinc-400">
                   1. Copy the login command and run it in your own terminal. 2. Finish the Google login flow in the browser or terminal prompt. 3. Run the verify command if you want to confirm the CLI is responding. 4. Return here and refresh status and models.
                 </p>
                 <div className="grid gap-2 md:grid-cols-2">
-                  <InlineCommand label="PowerShell login" value={catalog.manual_commands.powershell.login} />
-                  <InlineCommand label="Command Prompt login" value={catalog.manual_commands.cmd?.login ?? ""} />
-                  <InlineCommand label="Verify auth" value={catalog.manual_commands.powershell.verify} />
+                  <InlineCommand label="PowerShell login" value={effectiveCatalog.manual_commands.powershell.login} />
+                  <InlineCommand label="Command Prompt login" value={effectiveCatalog.manual_commands.cmd?.login ?? ""} />
+                  <InlineCommand label="Verify auth" value={effectiveCatalog.manual_commands.powershell.verify} />
                 </div>
-              </div>
-            ) : null}
-            {(catalog?.stdout || catalog?.stderr) ? (
-              <details className="sm:col-span-2 rounded-xl border border-white/10 bg-black/30 p-3 text-xs text-zinc-400">
-                <summary className="cursor-pointer text-zinc-200">Raw Gemini CLI probe output</summary>
-                {catalog?.stdout ? (
+                </div>
+                ) : null}
+                {effectiveCatalog?.stdout ? (
                   <div className="mt-3">
                     <p className="mb-1 text-[10px] uppercase tracking-[0.18em] text-zinc-500">Stdout</p>
-                    <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-[10px] leading-4 text-zinc-300">{catalog.stdout}</pre>
+                    <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-[10px] leading-4 text-zinc-300">{effectiveCatalog.stdout}</pre>
                   </div>
                 ) : null}
-                {catalog?.stderr ? (
+                {effectiveCatalog?.stderr ? (
                   <div className="mt-3">
                     <p className="mb-1 text-[10px] uppercase tracking-[0.18em] text-zinc-500">Stderr</p>
-                    <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-[10px] leading-4 text-zinc-300">{catalog.stderr}</pre>
+                    <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-[10px] leading-4 text-zinc-300">{effectiveCatalog.stderr}</pre>
                   </div>
                 ) : null}
               </details>
@@ -512,18 +550,128 @@ function ControllerCard({
           </LabeledField>
         ) : null}
 
-        <div className="sm:col-span-2">
-          <LabeledField label="Manual model override">
-            <Input
-              value={controller?.model ?? ""}
-              placeholder="Optional custom model id"
-              onChange={(event) => onUpdateController({ model: event.target.value })}
-            />
-          </LabeledField>
-        </div>
+        <details className="sm:col-span-2 rounded-xl border border-white/10 bg-white/[0.02] p-3">
+          <summary className="cursor-pointer text-sm text-zinc-300">Advanced options</summary>
+          <div className="mt-3 grid gap-4">
+            <LabeledField label="Manual model override">
+              <Input
+                value={controller?.model ?? ""}
+                placeholder="Optional custom model id"
+                onChange={(event) => onUpdateController({ model: event.target.value })}
+              />
+            </LabeledField>
+          </div>
+        </details>
       </div>
     </div>
   );
+}
+
+function formatReadinessState(state) {
+  return String(state ?? "unknown").replaceAll("_", " ");
+}
+
+function formatOpenCodeStatus(state) {
+  if (state === "hosted_model_unavailable") return "Hosted model blocked";
+  if (state === "provider_backed_model_unavailable") return "Provider-backed model blocked";
+  if (state === "connected_no_models") return "Connected, no models";
+  if (state === "model_required") return "Choose model";
+  if (state === "login_required") return "Connect OpenCode";
+  if (state === "ready") return "Ready to run";
+  return formatReadinessState(state);
+}
+
+function formatSelectedModelError(category, fallback = "") {
+  if (category === "quota_limited") return fallback || "This OpenCode-hosted model is currently rate limited or out of quota.";
+  if (category === "auth_required") return fallback || "This model needs account access or login before it can run.";
+  if (category === "provider_unavailable") return fallback || "This model is temporarily unavailable from OpenCode right now.";
+  if (category === "network_issue") return fallback || "GridNomad could not reach OpenCode for this model.";
+  if (category === "broken_environment") return fallback || "Your local OpenCode environment is broken.";
+  return fallback || "This model could not answer the verification prompt.";
+}
+
+function buildOpencodeModelLabel(modelId = "") {
+  const normalized = String(modelId || "").trim();
+  if (!normalized) {
+    return "";
+  }
+  const [provider, model] = normalized.split("/", 2);
+  if (!model) {
+    return normalized;
+  }
+  if (provider === "opencode") {
+    return model
+      .split("-")
+      .map((part) => (/^\d/.test(part) ? part.toUpperCase() : part.charAt(0).toUpperCase() + part.slice(1)))
+      .join(" ");
+  }
+  return `${model} (${provider})`;
+}
+
+function describeControllerSetup(provider, readinessState, catalog) {
+  if (provider === "opencode") {
+    if (readinessState === "ready") {
+      return {
+        title: "OpenCode is ready",
+        description: "Pick the model you want and run the simulation.",
+        detail: catalog?.models_scope ? `Available models come from ${catalog.models_scope === "credential+base" ? "your account plus OpenCode base models" : catalog.models_scope === "base" ? "OpenCode's visible model list" : "the current OpenCode environment"}.` : ""
+      };
+    }
+    if (readinessState === "model_required") {
+      return {
+        title: "Choose an OpenCode model",
+        description: "Your OpenCode environment is available, but this group still needs a model selection before it can run.",
+        detail: "Pick a hosted model such as MiniMax M2.5 Free or one of your connected provider-backed models."
+      };
+    }
+    if (readinessState === "hosted_model_unavailable") {
+      return {
+        title: "Selected OpenCode-hosted model is blocked",
+        description: "GridNomad found your selected hosted model, but OpenCode could not run it right now.",
+        detail: catalog?.login_hint ?? ""
+      };
+    }
+    if (readinessState === "provider_backed_model_unavailable") {
+      return {
+        title: "Selected provider-backed model is blocked",
+        description: "GridNomad found your selected provider-backed model, but OpenCode could not run it right now.",
+        detail: catalog?.login_hint ?? ""
+      };
+    }
+    return {
+      title: "Connect OpenCode in 2 steps",
+      description: "1. Copy the login command and run it in your terminal. 2. Come back here and press Refresh OpenCode.",
+      detail: catalog?.login_hint ?? ""
+    };
+  }
+
+  if (provider === "gemini-cli") {
+    if (readinessState === "ready") {
+      return {
+        title: "Gemini CLI is ready",
+        description: "Pick the model you want and run the simulation.",
+        detail: ""
+      };
+    }
+    if (readinessState === "model_required") {
+      return {
+        title: "Choose a Gemini model",
+        description: "Gemini CLI is connected, but this group still needs a model selection.",
+        detail: ""
+      };
+    }
+    return {
+      title: "Connect Gemini CLI in 2 steps",
+      description: "1. Copy the login command and run it in your terminal. 2. Come back here and press Refresh Gemini CLI.",
+      detail: catalog?.login_hint ?? ""
+    };
+  }
+
+  return {
+    title: `Controller status: ${formatReadinessState(readinessState)}`,
+    description: controllerReadiness({ provider }, catalog).message,
+    detail: ""
+  };
 }
 
 function HumanRosterEditor({ group, onUpdateHuman, nameValidation, onRegenerateDuplicateNames }) {
@@ -681,6 +829,113 @@ function InlineCommand({ label, value }) {
     <div className="rounded-lg border border-white/10 bg-white/[0.03] p-2">
       <p className="mb-1 text-[9px] uppercase tracking-[0.18em] text-zinc-500">{label}</p>
       <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-[10px] leading-4 text-zinc-300">{value || "Unavailable"}</pre>
+    </div>
+  );
+}
+
+function ModelChooser({ label, provider, models, modelEntries = [], value, query, onQueryChange, onSelect }) {
+  const filteredModels = useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase();
+    const pool = Array.from(new Set(models.filter(Boolean)));
+    if (!normalizedQuery) {
+      return pool;
+    }
+    return pool.filter((model) => model.toLowerCase().includes(normalizedQuery));
+  }, [models, query]);
+  const entryById = useMemo(() => new Map(modelEntries.map((entry) => [entry.id, entry])), [modelEntries]);
+  const hostedModels = filteredModels.filter((model) => (entryById.get(model)?.source_type ?? "") === "hosted");
+  const providerBackedModels = filteredModels.filter((model) => (entryById.get(model)?.source_type ?? "") === "provider_backed");
+  const otherModels = filteredModels.filter((model) => !hostedModels.includes(model) && !providerBackedModels.includes(model));
+
+  const selectedLabel = value || "No model selected";
+  const providerLabel = providerDisplayName(provider);
+
+  return (
+    <div className="grid gap-2">
+      <span className="text-[11px] uppercase tracking-[0.18em] text-zinc-500">{label}</span>
+      <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <p className="text-sm font-medium text-zinc-100">{selectedLabel}</p>
+            <p className="text-xs text-zinc-500">{providerLabel} controls every human in this group with this model.</p>
+          </div>
+          {value ? (
+            <Button variant="ghost" size="sm" onClick={() => onSelect("")}>Clear</Button>
+          ) : null}
+        </div>
+        <div className="relative mt-3">
+          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-zinc-500" />
+          <Input
+            value={query}
+            placeholder="Search models"
+            onChange={(event) => onQueryChange(event.target.value)}
+            className="pl-9"
+          />
+        </div>
+        <ScrollArea className="mt-3 h-48 rounded-xl border border-white/10 bg-black/20">
+          <div className="p-2">
+            {!filteredModels.length ? (
+              <div className="rounded-xl px-3 py-2 text-sm text-zinc-500">No models match this search.</div>
+            ) : null}
+            <ModelSection title="OpenCode-hosted" models={hostedModels} entryById={entryById} value={value} onSelect={onSelect} />
+            <ModelSection title="Connected provider models" models={providerBackedModels} entryById={entryById} value={value} onSelect={onSelect} />
+            <ModelSection title="Other models" models={otherModels} entryById={entryById} value={value} onSelect={onSelect} />
+          </div>
+        </ScrollArea>
+      </div>
+    </div>
+  );
+}
+
+function ModelSection({ title, models, entryById, value, onSelect }) {
+  if (!models.length) {
+    return null;
+  }
+  return (
+    <div className="mb-3">
+      <p className="mb-2 px-2 text-[10px] uppercase tracking-[0.18em] text-zinc-500">{title}</p>
+      {models.map((model) => {
+        const active = model === value;
+        const entry = entryById.get(model);
+        return (
+          <button
+            key={model}
+            type="button"
+            onClick={() => onSelect(model)}
+            className={`mb-1 flex w-full items-start justify-between rounded-xl px-3 py-2 text-left text-sm transition-colors ${
+              active
+                ? "bg-white/[0.12] text-white"
+                : "text-zinc-300 hover:bg-white/[0.06] hover:text-white"
+            }`}
+          >
+            <div className="pr-3">
+              <div className="break-all">{entry?.label || model}</div>
+              <div className="mt-1 flex flex-wrap gap-1">
+                {entry?.source_type ? (
+                  <Badge variant="muted" className="text-[10px]">
+                    {entry.source_type === "hosted" ? "Hosted by OpenCode" : entry.source_type === "provider_backed" ? "From connected provider" : "Unknown source"}
+                  </Badge>
+                ) : null}
+                {entry?.runtime_status && entry.runtime_status !== "unverified" ? (
+                  <Badge variant="outline" className={`text-[10px] ${entry.runtime_status === "ready" ? "border-emerald-500/30 text-emerald-100" : "border-amber-500/30 text-amber-100"}`}>
+                    {formatOpenCodeStatus(entry.runtime_status)}
+                  </Badge>
+                ) : null}
+              </div>
+            </div>
+            {active ? <Badge variant="outline" className="shrink-0 text-[10px]">Selected</Badge> : null}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function WizardStep({ label, text, active, complete }) {
+  return (
+    <div className={`rounded-xl border px-3 py-3 text-xs ${complete ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-100" : active ? "border-white/20 bg-white/[0.05] text-zinc-100" : "border-white/10 bg-black/20 text-zinc-500"}`}>
+      <p className="font-medium">{label}</p>
+      <p className="mt-1 leading-5">{text}</p>
     </div>
   );
 }

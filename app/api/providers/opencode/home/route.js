@@ -7,7 +7,8 @@ export async function POST(request) {
   await ensureProjectData();
   const payload = await request.json().catch(() => ({}));
   const currentCliHome = payload.currentCliHome ?? "";
-  const inspection = await createManagedOpencodeHome({ currentCliHome });
+  const model = payload.model ?? "";
+  const inspection = await createManagedOpencodeHome({ currentCliHome, model });
   return NextResponse.json({
     ok: true,
     supports_model_listing: true,

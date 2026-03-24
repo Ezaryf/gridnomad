@@ -169,12 +169,13 @@ export default function GridNomadDashboard() {
     }
   }
 
-  async function refreshProviderCatalog(scope, entityId, provider, { credential = "", cliHome = "", googleCloudProject = "", silent = false } = {}) {
+  async function refreshProviderCatalog(scope, entityId, provider, { credential = "", cliHome = "", googleCloudProject = "", model = "", silent = false } = {}) {
     try {
       const params = new URLSearchParams({ provider });
       if (credential) params.set("credential", credential);
       if (cliHome) params.set("cliHome", cliHome);
       if (googleCloudProject) params.set("googleCloudProject", googleCloudProject);
+      if (model) params.set("model", model);
       const response = await fetch(`/api/providers/catalog?${params.toString()}`, { cache: "no-store" });
       const payload = await response.json();
       setProviderCatalogs((c) => ({ ...c, [catalogKey(scope, entityId)]: payload }));
@@ -225,6 +226,7 @@ export default function GridNomadDashboard() {
         credential: group.controller?.opencodeProvider ?? "",
         cliHome: group.controller?.cliHome ?? "",
         googleCloudProject: group.controller?.googleCloudProject ?? "",
+        model: group.controller?.model ?? "",
         silent
       });
     }
@@ -499,6 +501,7 @@ export default function GridNomadDashboard() {
         credential: group?.controller?.opencodeProvider ?? "",
         cliHome: group?.controller?.cliHome ?? "",
         googleCloudProject: group?.controller?.googleCloudProject ?? "",
+        model: group?.controller?.model ?? "",
       });
     }
   }
@@ -509,6 +512,23 @@ export default function GridNomadDashboard() {
     await refreshProviderCatalog("group", groupId, "opencode", {
       credential,
       cliHome: group?.controller?.cliHome ?? "",
+      model: group?.controller?.model ?? "",
+    });
+  }
+
+  async function handleProviderModelChange(groupId, model) {
+    patchGroupController(groupId, { model });
+    const group = settings.groups.find((item) => item.id === groupId);
+    const provider = group?.controller?.provider ?? "heuristic";
+    if (provider === "heuristic") {
+      return;
+    }
+    await refreshProviderCatalog("group", groupId, provider, {
+      credential: group?.controller?.opencodeProvider ?? "",
+      cliHome: group?.controller?.cliHome ?? "",
+      googleCloudProject: group?.controller?.googleCloudProject ?? "",
+      model,
+      silent: true,
     });
   }
 
@@ -534,7 +554,10 @@ export default function GridNomadDashboard() {
       const response = await fetch("/api/providers/opencode/home", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ currentCliHome: group?.controller?.cliHome ?? "" })
+        body: JSON.stringify({
+          currentCliHome: group?.controller?.cliHome ?? "",
+          model: group?.controller?.model ?? "",
+        })
       });
       const payload = await response.json();
       if (!response.ok || payload.ok === false) {
@@ -543,7 +566,7 @@ export default function GridNomadDashboard() {
       patchGroupController(groupId, {
         cliHome: payload.resolved_cli_home ?? payload.cli_home_root ?? "",
         managedHomeId: payload.managed_home_id ?? "",
-        model: "",
+        model: group?.controller?.model ?? "",
         opencodeProvider: "",
         availableModels: payload.models ?? [],
         supportsModelListing: true,
@@ -889,6 +912,7 @@ export default function GridNomadDashboard() {
         onRefreshProviderCatalog={refreshProviderCatalog}
         onProviderChange={handleProviderChange}
         onProviderCredentialChange={handleProviderCredentialChange}
+        onProviderModelChange={handleProviderModelChange}
         onLaunchProviderLogin={launchProviderLogin}
         onCreateOpencodeHome={createManagedOpencodeHome}
         onCopyCommand={copyCommand}

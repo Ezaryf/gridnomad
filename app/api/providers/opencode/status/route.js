@@ -8,5 +8,6 @@ export async function GET(request) {
   const url = new URL(request.url);
   const credential = url.searchParams.get("credential") ?? "";
   const cliHome = url.searchParams.get("cliHome") ?? "";
-  return NextResponse.json(await inspectOpencode({ credential, cliHome }));
+  const model = url.searchParams.get("model") ?? "";
+  return NextResponse.json(await inspectOpencode({ credential, cliHome, model }));
 }
