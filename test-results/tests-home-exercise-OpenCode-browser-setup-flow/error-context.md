@@ -1,0 +1,151 @@
+# Page snapshot
+
+```yaml
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - banner [ref=e3]:
+      - button "Toggle groups panel" [ref=e5]:
+        - img
+      - generic [ref=e7]:
+        - generic [ref=e8]:
+          - generic [ref=e9]: Seed
+          - spinbutton "Seed" [ref=e10]: "123456"
+        - generic [ref=e11]:
+          - button "Randomize seed" [ref=e12]:
+            - img
+          - button "Copy seed" [ref=e13]:
+            - img
+      - generic [ref=e14]:
+        - generic [ref=e15]: Preset
+        - combobox "Preset" [ref=e16]:
+          - generic: Grand Continent
+          - img [ref=e17]
+      - generic [ref=e19]:
+        - generic [ref=e20]: Size
+        - combobox "Size" [ref=e21]:
+          - generic: 64×64
+          - img [ref=e22]
+      - generic [ref=e24]:
+        - generic [ref=e25]: Duration
+        - spinbutton "Duration" [ref=e26]: "80"
+      - generic [ref=e27]:
+        - generic [ref=e28]: Speed
+        - combobox "Speed" [ref=e29]:
+          - generic: 4×
+          - img [ref=e30]
+      - generic [ref=e32]:
+        - button "humans" [ref=e33]
+        - button "roads" [ref=e34]
+        - button "resources" [ref=e35]
+        - button "structures" [ref=e36]
+      - generic [ref=e37]:
+        - button "Generate" [disabled]
+        - button "Run" [disabled]:
+          - img
+          - text: Run
+        - button "Pause" [disabled]:
+          - img
+          - text: Pause
+        - button "Advanced settings" [ref=e39]:
+          - img
+        - button "Toggle inspector panel" [ref=e40]:
+          - img
+    - generic [ref=e41]:
+      - complementary [ref=e42]:
+        - generic [ref=e43]:
+          - generic [ref=e44]: Groups
+          - generic [ref=e45]:
+            - button "Add group" [disabled]:
+              - img
+            - button "Full setup" [ref=e46]:
+              - img
+        - generic [ref=e50]:
+          - article [ref=e51]:
+            - generic [ref=e52]:
+              - textbox [ref=e54]: Stone Path Circle
+              - button "Delete Group" [disabled]:
+                - img
+            - generic [ref=e55]:
+              - generic [ref=e56]:
+                - generic [ref=e57]: Pop
+                - spinbutton "Pop" [ref=e58]: "4"
+              - generic [ref=e59]:
+                - generic [ref=e60]: Model
+                - button "Choose model and credential" [ref=e61]:
+                  - generic [ref=e62]: Choose model and credential
+            - generic [ref=e63]: Ready to run with Heuristic (debug).
+          - article [ref=e64]:
+            - generic [ref=e65]:
+              - textbox [ref=e67]: Northplain Camp
+              - button "Delete Group" [disabled]:
+                - img
+            - generic [ref=e68]:
+              - generic [ref=e69]:
+                - generic [ref=e70]: Pop
+                - spinbutton "Pop" [ref=e71]: "4"
+              - generic [ref=e72]:
+                - generic [ref=e73]: Model
+                - button "Choose model and credential" [ref=e74]:
+                  - generic [ref=e75]: Choose model and credential
+            - generic [ref=e76]: Ready to run with Heuristic (debug).
+      - generic [ref=e77]:
+        - main [ref=e78]:
+          - generic [ref=e80]:
+            - img [ref=e82]
+            - generic [ref=e84]:
+              - heading "Environment Standing By" [level=3] [ref=e85]
+              - paragraph [ref=e86]: Configure your civilization parameters on the left, then generate a new world map to begin.
+            - button "Generate Map Blueprint" [disabled]
+        - generic [ref=e88]:
+          - generic [ref=e89]:
+            - tablist [ref=e91]:
+              - tab "Activity" [selected] [ref=e92]:
+                - img [ref=e93]
+                - text: Activity
+              - tab "Status" [ref=e95]:
+                - img [ref=e96]
+                - text: Status
+              - tab "Debug" [ref=e98]:
+                - img [ref=e99]
+                - text: Debug
+            - tabpanel "Activity" [ref=e102]:
+              - generic [ref=e103]:
+                - button "All" [ref=e104]
+                - button "Social" [ref=e105]
+                - button "Travel" [ref=e106]
+                - button "Failures" [ref=e107]
+              - generic [ref=e111]: No activity matches the current filter.
+          - generic [ref=e112]: Idle
+      - complementary [ref=e113]:
+        - generic [ref=e115]:
+          - generic [ref=e117]:
+            - generic [ref=e118]: Inspector
+            - generic [ref=e119]: 0 events
+          - generic [ref=e120]:
+            - tablist [ref=e122]:
+              - tab "Inspect" [selected] [ref=e123]:
+                - img [ref=e124]
+                - text: Inspect
+              - tab "Events" [ref=e127]:
+                - img [ref=e128]
+                - text: Events
+              - tab "Comms" [ref=e131]:
+                - img [ref=e132]
+                - text: Comms
+              - tab "Runs" [ref=e135]:
+                - img [ref=e136]
+                - text: Runs
+            - tabpanel "Inspect" [ref=e140]:
+              - generic [ref=e144]: Click a human or hover a tile to inspect.
+    - contentinfo [ref=e145]:
+      - generic [ref=e146]: Standing by
+      - generic [ref=e147]: Set up groups, assign controllers, and stream.
+      - generic [ref=e148]: Live step 0
+      - generic [ref=e149]: 00:00
+      - generic [ref=e150]: 0 humans
+      - generic [ref=e151]: ready
+      - generic [ref=e152]: 2 groups
+  - button "Open Next.js Dev Tools" [ref=e158] [cursor=pointer]:
+    - img [ref=e159]
+  - alert [ref=e162]
+```

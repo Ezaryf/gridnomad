@@ -129,10 +129,10 @@ class ProviderRoutingTests(unittest.TestCase):
             adapter.decide(context)
 
         command = mocked_run.call_args.args[0]
+        env = mocked_run.call_args.kwargs["env"]
         self.assertIn("--title", command)
         self.assertIn("GridNomad simulation", command)
-        self.assertIn("--provider", command)
-        self.assertIn("openrouter", command)
+        self.assertEqual(env.get("OPENCODE_PROVIDER"), "openrouter")
         self.assertIn("-m", command)
         self.assertIn("opencode/minimax-m2.5-free", command)
 

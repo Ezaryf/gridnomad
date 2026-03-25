@@ -25,8 +25,8 @@
       "population_count": 4,
       "culture_summary": "A small human group trying to survive, cooperate, and find meaning together.",
       "controller": {
-        "provider": "gemini-cli",
-        "model": "gemini-2.5-flash",
+        "provider": "opencode",
+        "model": "opencode/minimax-m2.5-free",
         "apiKey": "",
         "googleApiKey": "",
         "authMode": "existing-cli-auth",
@@ -35,13 +35,16 @@
         "opencodeProvider": "",
         "cliHome": "",
         "managedHomeId": "",
-        "executionMode": "per_human",
+        "executionMode": "group_batch",
         "timeoutSeconds": 120,
         "baseUrl": "",
         "availableModels": [
-          "gemini-2.5-flash",
-          "gemini-2.5-pro",
-          "gemini-2.0-flash-exp"
+          "opencode/big-pickle",
+          "opencode/gpt-5-nano",
+          "opencode/mimo-v2-omni-free",
+          "opencode/mimo-v2-pro-free",
+          "opencode/minimax-m2.5-free",
+          "opencode/nemotron-3-super-free"
         ],
         "supportsModelListing": true,
         "supportsManualModelEntry": true
@@ -196,8 +199,8 @@
       "population_count": 4,
       "culture_summary": "A small human group trying to survive, cooperate, and find meaning together.",
       "controller": {
-        "provider": "gemini-cli",
-        "model": "gemini-2.5-flash",
+        "provider": "opencode",
+        "model": "opencode",
         "apiKey": "",
         "googleApiKey": "",
         "authMode": "existing-cli-auth",
@@ -206,13 +209,16 @@
         "opencodeProvider": "",
         "cliHome": "",
         "managedHomeId": "",
-        "executionMode": "per_human",
+        "executionMode": "group_batch",
         "timeoutSeconds": 120,
         "baseUrl": "",
         "availableModels": [
-          "gemini-2.5-flash",
-          "gemini-2.5-pro",
-          "gemini-2.0-flash-exp"
+          "opencode/big-pickle",
+          "opencode/gpt-5-nano",
+          "opencode/mimo-v2-omni-free",
+          "opencode/mimo-v2-pro-free",
+          "opencode/minimax-m2.5-free",
+          "opencode/nemotron-3-super-free"
         ],
         "supportsModelListing": true,
         "supportsManualModelEntry": true
@@ -360,5 +366,13 @@
         }
       ]
     }
-  ]
+  ],
+  "opencode_connection": {
+    "enabled": true,
+    "storage_target": "GridNomad/OpenCode/Zen/default",
+    "cli_home": "C:\\Users\\ezary\\AppData\\Local\\GridNomad\\cli-runtime\\opencode-zen-default",
+    "health_state": "login_required",
+    "connected_provider": "opencode",
+    "last_verified_at": "2026-03-25T10:08:02.782Z"
+  }
 }

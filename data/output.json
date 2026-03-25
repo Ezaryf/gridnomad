@@ -1,0 +1,28 @@
+{
+  "action": "MOVE_WEST",
+  "target_x": null,
+  "target_y": null,
+  "target_agent_id": "group-02-human-05",
+  "reason": "Ada is right next to me to the west. I promised I'd find another way to reach her.",
+  "intent": "Move west to Ada's location to check on her and confirm I'm nearby.",
+  "speech": "Hey Ada! I'm right here. Got past the obstacle!",
+  "target_resource_kind": null,
+  "interaction_mode": "support",
+  "desired_distance": 1,
+  "updated_emotions": {
+    "Joy": 5,
+    "Sadness": 1,
+    "Fear": 2,
+    "Anger": 0,
+    "Disgust": 0,
+    "Surprise": 2
+  },
+  "updated_needs": {
+    "Survival": 4,
+    "Safety": 4,
+    "Belonging": 6,
+    "Esteem": 5,
+    "Self_Actualization": 4
+  },
+  "thought": "Ada is right there. I can reach her now."
+}

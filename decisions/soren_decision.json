@@ -1,0 +1,28 @@
+{
+  "action": "MOVE_WEST",
+  "target_x": 120,
+  "target_y": 77,
+  "target_agent_id": null,
+  "reason": "The grassland food source is 2 tiles west. I need to reach it to gather food for the group.",
+  "intent": "Reach the grassland food source west of here and gather food to contribute to the group.",
+  "speech": "Almost there. I can see the grassland from here.",
+  "target_resource_kind": "food",
+  "interaction_mode": null,
+  "desired_distance": 0,
+  "updated_emotions": {
+    "Joy": 4,
+    "Sadness": 1,
+    "Fear": 2,
+    "Anger": 1,
+    "Disgust": 0,
+    "Surprise": 2
+  },
+  "updated_needs": {
+    "Survival": 4,
+    "Safety": 3,
+    "Belonging": 5,
+    "Esteem": 5,
+    "Self_Actualization": 4
+  },
+  "thought": "Keep pushing forward. The others are counting on me to bring back food."
+}

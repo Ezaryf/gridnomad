@@ -1,0 +1,94 @@
+{
+  "seed": 42,
+  "config": {
+    "width": 10,
+    "height": 10,
+    "perception_radius": 3,
+    "snapshot_interval": 1,
+    "thought_memory_limit": 20,
+    "event_memory_limit": 20,
+    "reason_interval": 2
+  },
+  "tiles": [
+    {"x": 4, "y": 0, "terrain": "water"},
+    {"x": 4, "y": 1, "terrain": "water"}
+  ],
+  "factions": [
+    {
+      "id": "red",
+      "name": "Red Faction",
+      "controller": {
+        "provider": "opencode",
+        "opencode_provider": "minimax",
+        "model": "MiniMax-Text-01"
+      }
+    },
+    {
+      "id": "blue",
+      "name": "Blue Faction",
+      "controller": {
+        "provider": "opencode",
+        "opencode_provider": "minimax",
+        "model": "MiniMax-Text-01"
+      }
+    }
+  ],
+  "agents": [
+    {
+      "id": "red_1", "name": "Aria", "faction_id": "red", "x": 1, "y": 4,
+      "personality": { "openness": 8, "conscientiousness": 7, "extraversion": 5, "agreeableness": 8, "neuroticism": 3 },
+      "emotions": { "Joy": 5, "Sadness": 1, "Fear": 2, "Anger": 1, "Disgust": 0, "Surprise": 2 },
+      "needs": { "Survival": 5, "Safety": 5, "Belonging": 5, "Esteem": 5, "Self_Actualization": 5 },
+      "inventory": { "food": 5, "wood": 2, "stone": 0 }
+    },
+    {
+      "id": "red_2", "name": "Bram", "faction_id": "red", "x": 2, "y": 4,
+      "personality": { "openness": 6, "conscientiousness": 8, "extraversion": 6, "agreeableness": 7, "neuroticism": 4 },
+      "emotions": { "Joy": 5, "Sadness": 1, "Fear": 2, "Anger": 1, "Disgust": 0, "Surprise": 1 },
+      "needs": { "Survival": 5, "Safety": 5, "Belonging": 5, "Esteem": 5, "Self_Actualization": 5 },
+      "inventory": { "food": 5, "wood": 2, "stone": 0 }
+    },
+    {
+      "id": "red_3", "name": "Cora", "faction_id": "red", "x": 1, "y": 5,
+      "personality": { "openness": 7, "conscientiousness": 6, "extraversion": 8, "agreeableness": 6, "neuroticism": 5 },
+      "emotions": { "Joy": 5, "Sadness": 1, "Fear": 2, "Anger": 1, "Disgust": 0, "Surprise": 2 },
+      "needs": { "Survival": 5, "Safety": 5, "Belonging": 5, "Esteem": 5, "Self_Actualization": 5 },
+      "inventory": { "food": 5, "wood": 2, "stone": 0 }
+    },
+    {
+      "id": "red_4", "name": "Dane", "faction_id": "red", "x": 2, "y": 5,
+      "personality": { "openness": 5, "conscientiousness": 9, "extraversion": 4, "agreeableness": 5, "neuroticism": 2 },
+      "emotions": { "Joy": 5, "Sadness": 1, "Fear": 2, "Anger": 1, "Disgust": 0, "Surprise": 1 },
+      "needs": { "Survival": 5, "Safety": 5, "Belonging": 5, "Esteem": 5, "Self_Actualization": 5 },
+      "inventory": { "food": 5, "wood": 2, "stone": 0 }
+    },
+    {
+      "id": "blue_1", "name": "Elara", "faction_id": "blue", "x": 8, "y": 4,
+      "personality": { "openness": 9, "conscientiousness": 5, "extraversion": 7, "agreeableness": 9, "neuroticism": 4 },
+      "emotions": { "Joy": 5, "Sadness": 1, "Fear": 2, "Anger": 1, "Disgust": 0, "Surprise": 2 },
+      "needs": { "Survival": 5, "Safety": 5, "Belonging": 5, "Esteem": 5, "Self_Actualization": 5 },
+      "inventory": { "food": 5, "wood": 2, "stone": 0 }
+    },
+    {
+      "id": "blue_2", "name": "Finn", "faction_id": "blue", "x": 7, "y": 4,
+      "personality": { "openness": 6, "conscientiousness": 7, "extraversion": 8, "agreeableness": 6, "neuroticism": 3 },
+      "emotions": { "Joy": 5, "Sadness": 1, "Fear": 2, "Anger": 1, "Disgust": 0, "Surprise": 1 },
+      "needs": { "Survival": 5, "Safety": 5, "Belonging": 5, "Esteem": 5, "Self_Actualization": 5 },
+      "inventory": { "food": 5, "wood": 2, "stone": 0 }
+    },
+    {
+      "id": "blue_3", "name": "Gael", "faction_id": "blue", "x": 8, "y": 5,
+      "personality": { "openness": 4, "conscientiousness": 9, "extraversion": 3, "agreeableness": 5, "neuroticism": 2 },
+      "emotions": { "Joy": 5, "Sadness": 1, "Fear": 2, "Anger": 1, "Disgust": 0, "Surprise": 1 },
+      "needs": { "Survival": 5, "Safety": 5, "Belonging": 5, "Esteem": 5, "Self_Actualization": 5 },
+      "inventory": { "food": 5, "wood": 2, "stone": 0 }
+    },
+    {
+      "id": "blue_4", "name": "Hera", "faction_id": "blue", "x": 7, "y": 5,
+      "personality": { "openness": 8, "conscientiousness": 6, "extraversion": 9, "agreeableness": 8, "neuroticism": 5 },
+      "emotions": { "Joy": 5, "Sadness": 1, "Fear": 2, "Anger": 1, "Disgust": 0, "Surprise": 2 },
+      "needs": { "Survival": 5, "Safety": 5, "Belonging": 5, "Esteem": 5, "Self_Actualization": 5 },
+      "inventory": { "food": 5, "wood": 2, "stone": 0 }
+    }
+  ]
+}

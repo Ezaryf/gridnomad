@@ -118,15 +118,35 @@ test("synthesizeScenario expands groups into runtime factions and humans", () =>
 
 test("runtime controller map resolves groups into faction controller config", () => {
   const normalized = normalizeSettings(BASE_SCENARIO, {
+    opencode_connection: {
+      enabled: true,
+      cli_home: "C:/tmp/opencode-zen-default",
+      health_state: "ready",
+    },
     groups: [
       { id: "manual-keep", name: "Manual Keep", population_count: 6, controller: { provider: "openai", model: "gpt-5-mini", apiKey: "sk" } },
-      { id: "blue-circle", name: "Blue Circle", population_count: 4, controller: { provider: "gemini-cli", model: "gemini-2.5-pro" } }
+      { id: "blue-circle", name: "Blue Circle", population_count: 4, controller: { provider: "opencode", model: "opencode/minimax-m2.5-free" } }
     ]
   });
 
   const runtime = buildRuntimeControllerMap(normalized);
   assert.equal(runtime.factions["manual-keep"].provider, "openai");
-  assert.equal(runtime.factions["blue-circle"].provider, "gemini-cli");
+  assert.equal(runtime.factions["blue-circle"].provider, "opencode");
+  assert.equal(runtime.factions["blue-circle"].cliHome, "C:/tmp/opencode-zen-default");
+});
+
+test("normalizeSettings adds a default OpenCode connection block", () => {
+  const normalized = normalizeSettings(BASE_SCENARIO, { groups: [{ id: "group-01", name: "A", population_count: 2 }] });
+  assert.equal(normalized.opencode_connection.health_state, "not_connected");
+  assert.equal(normalized.opencode_connection.storage_target, "GridNomad/OpenCode/Zen/default");
+});
+
+test("opencode readiness blocks runs until the shared Zen connection exists", () => {
+  const readiness = controllerReadiness(
+    { provider: "opencode", model: "opencode/minimax-m2.5-free" },
+    { health_state: "not_connected" }
+  );
+  assert.equal(readiness.state, "not_connected");
 });
 
 

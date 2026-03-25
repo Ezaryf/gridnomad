@@ -1,0 +1,28 @@
+{
+  "action": "MOVE_NORTH",
+  "target_x": null,
+  "target_y": null,
+  "target_agent_id": null,
+  "reason": "The road should be somewhere north. If I can reach it, I can find another way to the settlement.",
+  "intent": "Keep pushing north toward the road system to find an alternate route around the blockage.",
+  "speech": "Just a bit further. The road has to be up here somewhere.",
+  "target_resource_kind": null,
+  "interaction_mode": null,
+  "desired_distance": null,
+  "updated_emotions": {
+    "Joy": 4,
+    "Sadness": 1,
+    "Fear": 1,
+    "Anger": 1,
+    "Disgust": 0,
+    "Surprise": 2
+  },
+  "updated_needs": {
+    "Survival": 3,
+    "Safety": 4,
+    "Belonging": 5,
+    "Esteem": 4,
+    "Self_Actualization": 5
+  },
+  "thought": "One more tile. Then another. I'll find a way around."
+}

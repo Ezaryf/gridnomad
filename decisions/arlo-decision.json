@@ -1,0 +1,28 @@
+{
+  "action": "MOVE_WEST",
+  "target_x": 38,
+  "target_y": 25,
+  "target_agent_id": null,
+  "reason": "There's coast food 1 tile west - I've been confused about direction enough, time to just get it.",
+  "intent": "Move west to grab the food I can see there before someone else does or I lose track of it again.",
+  "speech": null,
+  "target_resource_kind": "food",
+  "interaction_mode": null,
+  "desired_distance": null,
+  "updated_emotions": {
+    "Joy": 5,
+    "Sadness": 0,
+    "Fear": 2,
+    "Anger": 1,
+    "Disgust": 0,
+    "Surprise": 2
+  },
+  "updated_needs": {
+    "Survival": 3,
+    "Safety": 4,
+    "Belonging": 4,
+    "Esteem": 3,
+    "Self_Actualization": 4
+  },
+  "thought": "Finally going the right direction. Just get the food and stopsecond-guessing myself."
+}
