@@ -2,15 +2,20 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-import { KeyRound, Plus, Search, Settings2, UserRoundCog } from "lucide-react";
+import { Cable, CheckCircle2, Info, KeyRound, Plus, Search, Settings2, Shield, Sparkles, Terminal, UserRoundCog, Zap } from "lucide-react";
+
 
 import {
+  ANTHROPIC_MODELS,
   controllerReadiness,
+  GEMINI_API_MODELS,
+  GEMINI_MODELS,
+  OPENAI_MODELS,
+  OPENCODE_ZEN_MODELS,
   PROVIDER_OPTIONS,
   providerDisplayName,
   providerSupportsBaseUrl,
-  providerUsesApiKey,
-  providerUsesLogin
+  providerUsesApiKey
 } from "@/lib/civilization-setup";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -37,6 +42,17 @@ export default function CivilizationSettingsSheet({
   onTabChange,
   settings,
   providerCatalogs,
+  opencodeCatalog,
+  opencodeZenKeyDraft,
+  onOpencodeZenKeyDraftChange,
+  onPatchGroup,
+  onPatchGroupController,
+  onUpdateProviderConnection,
+  onPatchProviders,
+  onPatchOpencodeConnection,
+  onPatchWorld,
+  onAction,
+  onRefreshCatalogs,
   busy,
   onUpdateWorld,
   onAddGroup,
@@ -44,14 +60,12 @@ export default function CivilizationSettingsSheet({
   onUpdateGroup,
   onUpdateHuman,
   onUpdateGroupController,
+  onSelectControllerModel,
+  onProviderChange,
+  onProviderModelChange,
   onSaveSettings,
   onGenerateWorld,
   onRefreshProviderCatalog,
-  onProviderChange,
-  onProviderCredentialChange,
-  onProviderModelChange,
-  onLaunchProviderLogin,
-  onCreateOpencodeHome,
   onCopyCommand,
   nameValidation,
   onRegenerateDuplicateNames
@@ -60,8 +74,8 @@ export default function CivilizationSettingsSheet({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="left" className="w-full p-0 sm:max-w-[880px]">
-        <SheetHeader className="border-b border-white/20 px-6 py-5">
+      <SheetContent side="left" className="w-full p-0 sm:max-w-[880px] bg-[#030303]/90 backdrop-blur-3xl border-r border-white/6">
+        <SheetHeader className="border-b border-white/6 px-6 py-5">
           <SheetTitle>Simulation setup</SheetTitle>
           <SheetDescription>
             Tune the world and manage the human groups that the AI controllers will power.
@@ -69,13 +83,22 @@ export default function CivilizationSettingsSheet({
         </SheetHeader>
 
         <Tabs value={activeTab} onValueChange={onTabChange} className="flex min-h-0 flex-1 flex-col">
-          <div className="border-b border-white/20 px-6 py-4">
-            <TabsList className="grid w-full grid-cols-2">
-              <TabsTrigger value="world">
+          <div className="border-b border-white/6 px-6 py-4">
+            <TabsList className="grid w-full grid-cols-3 h-10 bg-white/5 rounded-[12px] p-1">
+              <TabsTrigger value="world" className="rounded-[8px] data-[state=active]:bg-white/10 data-[state=active]:text-white data-[state=active]:shadow-sm">
                 <Settings2 className="mr-2 size-4" />
                 World
               </TabsTrigger>
-              <TabsTrigger value="groups">
+              <TabsTrigger value="connection" className="relative rounded-[8px] data-[state=active]:bg-white/10 data-[state=active]:text-white data-[state=active]:shadow-sm">
+                <Cable className="mr-2 size-4" />
+                Connection
+                {opencodeCatalog?.health_state === "ready" ? (
+                  <span className="absolute -right-0.5 -top-0.5 size-2 rounded-full bg-emerald-400" />
+                ) : opencodeCatalog?.health_state && opencodeCatalog?.health_state !== "not_connected" ? (
+                  <span className="absolute -right-0.5 -top-0.5 size-2 rounded-full bg-amber-400" />
+                ) : null}
+              </TabsTrigger>
+              <TabsTrigger value="groups" className="rounded-[8px] data-[state=active]:bg-white/10 data-[state=active]:text-white data-[state=active]:shadow-sm">
                 <UserRoundCog className="mr-2 size-4" />
                 Groups
               </TabsTrigger>
@@ -84,7 +107,7 @@ export default function CivilizationSettingsSheet({
 
           <ScrollArea className="min-h-0 flex-1">
             <TabsContent value="world" className="m-0 px-6 py-5">
-              <Card className="border-white/20 bg-white/10 backdrop-blur-[10px] backdrop-saturate-180">
+              <Card className="border-white/6 bg-white/3 backdrop-blur-2xl shadow-[0_12px_40px_rgba(0,0,0,0.5)] rounded-[20px]">
                 <CardHeader>
                   <CardTitle>World generator</CardTitle>
                   <CardDescription>
@@ -134,7 +157,26 @@ export default function CivilizationSettingsSheet({
               </Card>
             </TabsContent>
 
+            <TabsContent value="connection" className="m-0 px-6 py-5">
+              <ConnectionTab
+                opencodeCatalog={opencodeCatalog}
+                opencodeZenKeyDraft={opencodeZenKeyDraft}
+                onOpencodeZenKeyDraftChange={onOpencodeZenKeyDraftChange}
+                onUpdateProviderConnection={onUpdateProviderConnection}
+                onRefreshOpencodeZen={onRefreshCatalogs}
+                onCopyCommand={(cmd) => onAction("Command", cmd)}
+                groups={settings.groups}
+                providers={settings.providers}
+              />
+            </TabsContent>
+
             <TabsContent value="groups" className="m-0 px-6 py-5">
+              <OpenCodeConnectionBanner
+                opencodeCatalog={opencodeCatalog}
+                groups={groups}
+                onSwitchTab={() => onTabChange("connection")}
+              />
+
               <div className="mb-4 flex items-center justify-between gap-3">
                 <div>
                   <h3 className="text-base font-semibold text-zinc-100">Human groups</h3>
@@ -162,7 +204,7 @@ export default function CivilizationSettingsSheet({
 
               <div className="space-y-6">
                 {groups.map((group) => (
-                  <Card key={group.id} className="bg-white/[0.025]">
+                  <Card key={group.id} className="border-white/6 bg-white/2 shadow-[0_12px_40px_rgba(0,0,0,0.5)] backdrop-blur-2xl rounded-[20px]">
                     <CardHeader>
                       <div className="flex items-start justify-between gap-4">
                         <div className="flex items-start gap-3">
@@ -182,7 +224,7 @@ export default function CivilizationSettingsSheet({
                         </div>
                       ) : null}
 
-                      <div className="grid gap-4 sm:grid-cols-2">
+                      <div className="grid gap-4 sm:grid-cols-3">
                         <LabeledField label="Group name">
                           <Input value={group.name} onChange={(event) => onUpdateGroup(group.id, { name: event.target.value })} />
                         </LabeledField>
@@ -191,16 +233,6 @@ export default function CivilizationSettingsSheet({
                         </LabeledField>
                         <LabeledField label="Population">
                           <Input type="number" min="1" max="24" value={group.population_count} onChange={(event) => onUpdateGroup(group.id, { population_count: Number(event.target.value) })} />
-                        </LabeledField>
-                        <LabeledField label="Provider">
-                          <Select value={group.controller?.provider ?? "heuristic"} onValueChange={(value) => onProviderChange(group.id, value)}>
-                            <SelectTrigger><SelectValue /></SelectTrigger>
-                            <SelectContent>
-                              {PROVIDER_OPTIONS.map((option) => (
-                                <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
                         </LabeledField>
                       </div>
 
@@ -211,25 +243,15 @@ export default function CivilizationSettingsSheet({
                       <Separator className="bg-white/20" />
 
                       <ControllerCard
-                        title={`${group.name} controller`}
-                        subtitle={`This controller powers all ${group.population_count} humans in the group`}
+                        key={group.id}
                         group={group}
-                        controller={group.controller}
-                        catalog={providerCatalogs[`group:${group.id}`]}
-                        onRefreshProviderCatalog={(provider, credential = "") => onRefreshProviderCatalog("group", group.id, provider, {
-                          credential,
-                          cliHome: group.controller?.cliHome ?? "",
-                          googleCloudProject: group.controller?.googleCloudProject ?? "",
-                          model: group.controller?.model ?? "",
-                        })}
-                        onProviderChange={(provider) => onProviderChange(group.id, provider)}
-                        onCredentialChange={(credential) => onProviderCredentialChange(group.id, credential)}
-                        onModelChange={(model) => onProviderModelChange(group.id, model)}
-                        onUpdateController={(patch) => onUpdateGroupController(group.id, patch)}
-                        onLaunchProviderLogin={onLaunchProviderLogin}
-                        onCreateOpencodeHome={() => onCreateOpencodeHome(group.id)}
-                        onCopyCommand={onCopyCommand}
+                        status={controllerReadiness(group.controller, providerCatalogs[`group:${group.id}`], settings.providers)}
+                        catalog={providerCatalogs[`group:${group.id}`] ?? null}
+                        opencodeCatalog={opencodeCatalog}
+                        onPatchController={(patch) => onPatchGroupController(group.id, patch)}
+                        onUpdateProviderConnection={onUpdateProviderConnection}
                       />
+
 
                       <Separator className="bg-white/20" />
 
@@ -262,307 +284,280 @@ export default function CivilizationSettingsSheet({
 }
 
 function ControllerCard({
-  title,
-  subtitle,
   group,
-  controller,
+  status,
   catalog,
-  onRefreshProviderCatalog,
-  onProviderChange,
-  onCredentialChange,
-  onModelChange,
-  onUpdateController,
-  onLaunchProviderLogin,
-  onCreateOpencodeHome,
-  onCopyCommand
+  opencodeCatalog,
+  onPatchController,
+  onUpdateProviderConnection,
 }) {
+  const controller = group.controller ?? {};
   const provider = controller?.provider ?? "heuristic";
-  const effectiveCatalog = catalog?.provider === provider || !catalog?.provider ? catalog : null;
-  const models = effectiveCatalog?.models?.length ? effectiveCatalog.models : controller?.availableModels ?? [];
-  const modelEntries = effectiveCatalog?.model_entries ?? [];
-  const credentials = effectiveCatalog?.credentials ?? [];
-  const healthState = effectiveCatalog?.health_state ?? effectiveCatalog?.auth_status ?? "local";
-  const needsOpencodeLogin = provider === "opencode" && (healthState === "login_required" || healthState === "connected_no_models");
-  const readiness = controllerReadiness(controller, effectiveCatalog);
-  const setupGuide = describeControllerSetup(provider, readiness.state, effectiveCatalog);
-  const showAdvancedCatalog = Boolean(effectiveCatalog?.stdout || effectiveCatalog?.stderr || effectiveCatalog?.manual_commands?.powershell?.login);
-  const [modelQuery, setModelQuery] = useState("");
-  const selectedModel = controller?.model ?? "";
+  const selectedModel = String(controller?.model ?? "").trim();
+
+  const baseCatalog = provider === "opencode"
+    ? (opencodeCatalog?.provider === "opencode" || opencodeCatalog?.connected_provider === "opencode" ? opencodeCatalog : null)
+    : null;
+  const effectiveCatalog = provider === "opencode"
+    ? {
+        ...(baseCatalog ?? {}),
+        ...(catalog ?? {}),
+        models: baseCatalog?.models?.length ? baseCatalog.models : (catalog?.models ?? []),
+        model_entries: catalog?.model_entries?.length ? catalog.model_entries : (baseCatalog?.model_entries ?? []),
+        manual_commands: baseCatalog?.manual_commands ?? catalog?.manual_commands,
+      }
+    : (catalog?.provider === provider || !catalog?.provider ? catalog : null);
+
+  const setupGuide = describeControllerSetup(provider, status.state, effectiveCatalog, selectedModel);
+  const setupTitle = setupGuide.title;
+  const setupDescription = setupGuide.description;
+  const setupDetail = setupGuide.detail;
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h4 className="text-base font-semibold text-zinc-100">{title}</h4>
-          <p className="text-sm text-zinc-400">{subtitle}.</p>
+    <Card className="border-white/6 bg-white/3 backdrop-blur-2xl shadow-[0_12px_40px_rgba(0,0,0,0.5)] rounded-[20px]">
+      <CardHeader className="pb-3">
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="flex size-10 items-center justify-center rounded-xl bg-white/5 border border-white/5">
+              <UserRoundCog className="size-5 text-zinc-400" />
+            </div>
+            <div>
+              <CardTitle className="text-lg">{group.name} controller</CardTitle>
+              <CardDescription>This controller powers all {group.population_count} humans in the group.</CardDescription>
+            </div>
+          </div>
+          <div className="flex flex-col items-end gap-1">
+            <Badge variant="muted">{providerDisplayName(provider)}</Badge>
+            <Badge
+              variant={status.state === "ready" ? "default" : "outline"}
+              className={status.state === "ready"
+                ? "text-[10px]"
+                : "border-red-500/40 bg-red-500/10 text-[10px] text-red-200"
+              }
+            >
+              {status.state === "ready" ? "● Ready" : status.state === "not_connected" ? "○ Not configured" : formatReadinessState(status.state)}
+            </Badge>
+          </div>
         </div>
-        <div className="flex flex-col items-end gap-1">
-          <Badge variant="muted">{providerDisplayName(provider)}</Badge>
-          <Badge variant="default" className={readiness.state === "ready" ? "text-[10px]" : "border-red-500/40 bg-red-500/10 text-[10px] text-red-200"}>{formatReadinessState(readiness.state)}</Badge>
-        </div>
-      </div>
-
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div className="sm:col-span-2 rounded-xl border border-white/10 bg-white/[0.03] p-3 text-xs leading-5 text-zinc-400">
-          <p className="font-medium text-zinc-200">{setupGuide.title}</p>
-          <p>{setupGuide.description}</p>
-          {setupGuide.detail ? <p className="mt-1 text-zinc-500">{setupGuide.detail}</p> : null}
-        </div>
-
-        <LabeledField label="Provider">
-          <Select value={provider} onValueChange={onProviderChange}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <LabeledField label="Intelligence Provider">
+          <Select value={controller.provider || "heuristic"} onValueChange={(v) => onPatchController({ provider: v, model: "" })}>
+            <SelectTrigger className="h-10 rounded-xl bg-black/20 text-sm shadow-none">
+              <SelectValue />
+            </SelectTrigger>
             <SelectContent>
-              {PROVIDER_OPTIONS.map((option) => (
-                <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+              {PROVIDER_OPTIONS.map((o) => (
+                <SelectItem key={o.value} value={o.value} className="text-sm">
+                  {o.label}
+                </SelectItem>
               ))}
             </SelectContent>
           </Select>
         </LabeledField>
 
-        {provider === "opencode" ? (
-          <>
-            <div className="sm:col-span-2 rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <p className="text-sm font-semibold text-zinc-100">OpenCode wizard</p>
-                  <p className="mt-1 text-xs leading-5 text-zinc-400">{setupGuide.description}</p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Badge variant="outline" className="text-[10px]">
-                    {effectiveCatalog?.environment_source === "managed-home" ? "isolated home" : "user-global home"}
-                  </Badge>
-                  <Badge variant={readiness.state === "ready" ? "default" : "outline"} className={readiness.state === "ready" ? "text-[10px]" : "border-amber-500/30 bg-amber-500/10 text-[10px] text-amber-100"}>
-                    {formatOpenCodeStatus(readiness.state)}
-                  </Badge>
-                </div>
-              </div>
-              <div className="mt-4 grid gap-3 md:grid-cols-4">
-                <WizardStep
-                  label="1. Connect"
-                  active={["login_required", "not_installed"].includes(readiness.state)}
-                  complete={!["login_required", "not_installed"].includes(readiness.state)}
-                  text={effectiveCatalog?.environment_source === "managed-home" ? "Using isolated OpenCode home." : "Using user-global OpenCode home."}
-                />
-                <WizardStep
-                  label="2. Choose model"
-                  active={!selectedModel}
-                  complete={Boolean(selectedModel)}
-                  text={selectedModel ? buildOpencodeModelLabel(selectedModel) : "Pick a hosted or provider-backed model."}
-                />
-                <WizardStep
-                  label="3. Verify runtime"
-                  active={Boolean(selectedModel) && readiness.state !== "ready"}
-                  complete={readiness.state === "ready"}
-                  text={effectiveCatalog?.selected_model_status ? formatOpenCodeStatus(effectiveCatalog.selected_model_status) : "Run a smoke prompt against the selected model."}
-                />
-                <WizardStep
-                  label="4. Ready"
-                  active={readiness.state === "ready"}
-                  complete={readiness.state === "ready"}
-                  text={readiness.state === "ready" ? "This group can run now." : "Run stays blocked until the selected model is verified."}
-                />
-              </div>
-              <div className="mt-4 flex flex-wrap items-center gap-2">
-                {readiness.state === "login_required" ? (
-                  <Button
-                    onClick={() => onCopyCommand("OpenCode login command", effectiveCatalog?.manual_commands?.powershell?.login ?? "")}
-                    disabled={!effectiveCatalog?.manual_commands?.powershell?.login}
-                  >
-                    <KeyRound className="size-4" />
-                    Copy login command
-                  </Button>
-                ) : null}
-                {selectedModel && readiness.state !== "ready" ? (
-                  <Button onClick={() => onRefreshProviderCatalog("opencode", controller?.opencodeProvider ?? "")}>
-                    Verify {buildOpencodeModelLabel(selectedModel)}
-                  </Button>
-                ) : null}
-                <Button variant="outline" onClick={() => onRefreshProviderCatalog("opencode", controller?.opencodeProvider ?? "")}>Refresh OpenCode</Button>
-                <Button variant="ghost" onClick={onCreateOpencodeHome}>Use isolated home</Button>
-              </div>
-              <div className="mt-3 text-xs leading-5 text-zinc-500">
-                {effectiveCatalog?.login_hint ?? "Use your user-global OpenCode account or create an isolated OpenCode home if you want GridNomad to use a separate OpenCode environment."}
-              </div>
-              {effectiveCatalog?.selected_model_error_category ? (
-                <div className="mt-3 rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-100">
-                  {formatSelectedModelError(effectiveCatalog.selected_model_error_category, effectiveCatalog?.decision_probe?.error)}
-                </div>
-              ) : null}
-            </div>
-            <div className="sm:col-span-2">
-              <ModelChooser
-                label="Choose model"
-                provider={provider}
-                models={models}
-                modelEntries={modelEntries}
-                value={selectedModel}
-                query={modelQuery}
-                onQueryChange={setModelQuery}
-                onSelect={onModelChange}
-              />
-            </div>
-            {credentials.length > 0 ? (
-            <LabeledField label="Credential">
-              <Select value={controller?.opencodeProvider || "__empty__"} onValueChange={(value) => onCredentialChange(value === "__empty__" ? "" : value)}>
-                <SelectTrigger><SelectValue placeholder="Choose credential" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__empty__">Default credential</SelectItem>
-                  {credentials.map((credential) => (
-                    <SelectItem key={credential} value={credential}>{credential}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </LabeledField>
-            ) : null}
-            {showAdvancedCatalog ? (
-              <details className="sm:col-span-2 rounded-xl border border-white/10 bg-black/30 p-3 text-xs text-zinc-400">
-                <summary className="cursor-pointer text-zinc-200">Advanced OpenCode details</summary>
-                {effectiveCatalog?.manual_commands?.powershell?.login ? (
-                <div className="mt-3">
-                <p className="mb-2 text-xs leading-5 text-zinc-400">
-                  Default setup uses your user-global OpenCode account. If you want an isolated account cache just for GridNomad, create an isolated home, run the copied login command in your own terminal, finish login, then refresh.
-                </p>
-                <div className="grid gap-2 md:grid-cols-2">
-                  <InlineCommand label="PowerShell login" value={effectiveCatalog.manual_commands.powershell.login} />
-                  <InlineCommand label="Command Prompt login" value={effectiveCatalog.manual_commands.cmd?.login ?? ""} />
-                  <InlineCommand label="Verify auth" value={effectiveCatalog.manual_commands.powershell.verify} />
-                  <InlineCommand label="List models" value={effectiveCatalog.manual_commands.powershell.models} />
-                </div>
-                </div>
-                ) : null}
-                {effectiveCatalog?.stdout ? (
-                  <div className="mt-3">
-                    <p className="mb-1 text-[10px] uppercase tracking-[0.18em] text-zinc-500">Stdout</p>
-                    <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-[10px] leading-4 text-zinc-300">{effectiveCatalog.stdout}</pre>
-                  </div>
-                ) : null}
-                {effectiveCatalog?.stderr ? (
-                  <div className="mt-3">
-                    <p className="mb-1 text-[10px] uppercase tracking-[0.18em] text-zinc-500">Stderr</p>
-                    <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-[10px] leading-4 text-zinc-300">{effectiveCatalog.stderr}</pre>
-                  </div>
-                ) : null}
-              </details>
-            ) : null}
-          </>
-        ) : null}
+        <LabeledField label="Model Selection">
+          <ProviderModelChooser
+            provider={provider}
+            currentModel={selectedModel}
+            catalog={catalog}
+            opencodeCatalog={opencodeCatalog}
+            onSelect={(p, m) => onPatchController({ provider: p, model: m })}
+          />
+        </LabeledField>
 
-        {provider === "gemini-cli" ? (
-          <>
-            <div className="sm:col-span-2 rounded-xl border border-white/10 bg-white/[0.03] p-3 text-xs leading-5 text-zinc-400">
-              <p className="font-medium text-zinc-200">Gemini CLI status: {formatReadinessState(healthState)}</p>
-              <p>{effectiveCatalog?.login_hint ?? "Use your Google account in Gemini CLI, then refresh status and models."}</p>
-              {effectiveCatalog?.gemini_path ? <p className="mt-1 text-zinc-500">CLI executable: {effectiveCatalog.gemini_path}</p> : null}
-              {effectiveCatalog?.resolved_cli_home ? <p className="mt-1 text-zinc-500">User-global home: {effectiveCatalog.resolved_cli_home}</p> : null}
-              {controller?.googleCloudProject ? <p className="mt-1 text-zinc-500">Google Cloud Project: {controller.googleCloudProject}</p> : null}
-            </div>
-            <div className="flex flex-wrap items-end gap-2 sm:col-span-2">
-              <Button
-                variant="outline"
-                onClick={() => onCopyCommand("Gemini CLI login command", effectiveCatalog?.manual_commands?.powershell?.login ?? "")}
-                disabled={!effectiveCatalog?.manual_commands?.powershell?.login}
-              >
-                <KeyRound className="size-4" />
-                Copy login command
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => onCopyCommand("Gemini CLI verify command", effectiveCatalog?.manual_commands?.powershell?.verify ?? "")}
-                disabled={!effectiveCatalog?.manual_commands?.powershell?.verify}
-              >
-                Copy verify command
-              </Button>
-              <Button variant="outline" onClick={() => onRefreshProviderCatalog("gemini-cli", "")}>Refresh Gemini CLI</Button>
-            </div>
-            {showAdvancedCatalog ? (
-              <details className="sm:col-span-2 rounded-xl border border-white/10 bg-black/30 p-3 text-xs text-zinc-400">
-                <summary className="cursor-pointer text-zinc-200">Advanced Gemini CLI details</summary>
-                {effectiveCatalog?.manual_commands?.powershell?.login ? (
-                <div className="mt-3">
-                <p className="mb-2 text-xs leading-5 text-zinc-400">
-                  1. Copy the login command and run it in your own terminal. 2. Finish the Google login flow in the browser or terminal prompt. 3. Run the verify command if you want to confirm the CLI is responding. 4. Return here and refresh status and models.
-                </p>
-                <div className="grid gap-2 md:grid-cols-2">
-                  <InlineCommand label="PowerShell login" value={effectiveCatalog.manual_commands.powershell.login} />
-                  <InlineCommand label="Command Prompt login" value={effectiveCatalog.manual_commands.cmd?.login ?? ""} />
-                  <InlineCommand label="Verify auth" value={effectiveCatalog.manual_commands.powershell.verify} />
-                </div>
-                </div>
-                ) : null}
-                {effectiveCatalog?.stdout ? (
-                  <div className="mt-3">
-                    <p className="mb-1 text-[10px] uppercase tracking-[0.18em] text-zinc-500">Stdout</p>
-                    <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-[10px] leading-4 text-zinc-300">{effectiveCatalog.stdout}</pre>
-                  </div>
-                ) : null}
-                {effectiveCatalog?.stderr ? (
-                  <div className="mt-3">
-                    <p className="mb-1 text-[10px] uppercase tracking-[0.18em] text-zinc-500">Stderr</p>
-                    <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-[10px] leading-4 text-zinc-300">{effectiveCatalog.stderr}</pre>
-                  </div>
-                ) : null}
-              </details>
-            ) : null}
-          </>
-        ) : null}
 
-        {providerUsesLogin(provider) && !["opencode", "gemini-cli"].includes(provider) ? (
-          <div className="flex flex-wrap items-end gap-2 sm:col-span-2">
-            <Button variant="outline" onClick={() => onLaunchProviderLogin(provider)}>
-              <KeyRound className="size-4" />
-              Login
-            </Button>
-            <Button variant="outline" onClick={() => onRefreshProviderCatalog(provider, "")}>Refresh models</Button>
+        <div className="rounded-2xl border border-white/6 bg-white/[0.03] p-4">
+          <div className="flex gap-4">
+            <div className="mt-1 flex size-8 shrink-0 items-center justify-center rounded-xl bg-white/5">
+              <Info className="size-4 text-zinc-400" />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-zinc-200">{setupTitle}</p>
+              <p className="mt-1 text-xs leading-relaxed text-zinc-400">{setupDescription}</p>
+              {setupDetail ? <p className="mt-2 text-[11px] font-medium text-zinc-500 italic">{setupDetail}</p> : null}
+            </div>
           </div>
-        ) : null}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
 
-        {providerUsesApiKey(provider) ? (
-          <LabeledField label="API key">
-            <Input
-              type="password"
-              value={controller?.apiKey ?? ""}
-              placeholder="Enter API key"
-              onChange={(event) => onUpdateController({ apiKey: event.target.value })}
-            />
-          </LabeledField>
-        ) : null}
+function ConnectionTab({
+  opencodeCatalog,
+  opencodeZenKeyDraft,
+  onOpencodeZenKeyDraftChange,
+  onUpdateProviderConnection,
+  onRefreshOpencodeZen,
+  onCopyCommand,
+  groups,
+  providers,
+}) {
+  const opencodeHealth = opencodeCatalog?.health_state ?? "not_connected";
+  const opencodeConnected = opencodeHealth === "ready" || opencodeHealth === "rate_limited" || opencodeHealth === "model_required" || opencodeHealth === "login_required";
+  const opencodeGroups = (groups ?? []).filter((g) => g.controller?.provider === "opencode");
+  const models = opencodeCatalog?.models ?? [];
 
-        {providerSupportsBaseUrl(provider) ? (
-          <LabeledField label="Base URL">
-            <Input
-              value={controller?.baseUrl ?? ""}
-              placeholder="Optional custom endpoint"
-              onChange={(event) => onUpdateController({ baseUrl: event.target.value })}
-            />
-          </LabeledField>
-        ) : null}
-
-        {["openai", "anthropic", "gemini-api", "gemini-cli", "opencode"].includes(provider) ? (
-          <LabeledField label="Timeout (seconds)">
-            <Input
-              type="number"
-              min="15"
-              max="600"
-              value={controller?.timeoutSeconds ?? 120}
-              onChange={(event) => onUpdateController({ timeoutSeconds: Number(event.target.value) })}
-            />
-          </LabeledField>
-        ) : null}
-
-        <details className="sm:col-span-2 rounded-xl border border-white/10 bg-white/[0.02] p-3">
-          <summary className="cursor-pointer text-sm text-zinc-300">Advanced options</summary>
-          <div className="mt-3 grid gap-4">
-            <LabeledField label="Manual model override">
+  return (
+    <div className="space-y-6">
+      {/* ── OPENCODE ZEN ── */}
+      <Card className="border-white/6 bg-white/3 backdrop-blur-2xl shadow-[0_12px_40px_rgba(0,0,0,0.5)] rounded-[20px]">
+        <CardHeader>
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="flex size-10 items-center justify-center rounded-xl bg-blue-500/10 border border-blue-500/20">
+                <Cable className="size-5 text-blue-400" />
+              </div>
+              <div>
+                <CardTitle className="text-lg">OpenCode Zen</CardTitle>
+                <CardDescription>Primary local AI runtime.</CardDescription>
+              </div>
+            </div>
+            <Badge
+              variant={opencodeHealth === "ready" ? "default" : "outline"}
+              className={opencodeHealth === "ready"
+                ? "border-emerald-500/30 bg-emerald-500/15 text-emerald-100 text-[10px]"
+                : opencodeHealth === "not_connected"
+                  ? "border-zinc-500/30 text-zinc-400 text-[10px]"
+                  : "border-amber-500/30 bg-amber-500/10 text-amber-100 text-[10px]"
+              }
+            >
+              {opencodeHealth === "ready" ? "● Connected" : formatOpenCodeStatus(opencodeHealth)}
+            </Badge>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <LabeledField label="OpenCode Zen API Key">
+            <div className="flex gap-2">
               <Input
-                value={controller?.model ?? ""}
-                placeholder="Optional custom model id"
-                onChange={(event) => onUpdateController({ model: event.target.value })}
+                type="password"
+                value={opencodeZenKeyDraft}
+                placeholder={opencodeConnected ? "Paste a new key to update" : "sk-..."}
+                onChange={(event) => onOpencodeZenKeyDraftChange(event.target.value)}
+                className="bg-black/20"
               />
-            </LabeledField>
-          </div>
-        </details>
+              <Button 
+                onClick={() => onUpdateProviderConnection("opencode", { apiKey: opencodeZenKeyDraft })} 
+                disabled={!opencodeZenKeyDraft.trim()}
+                className="shrink-0"
+              >
+                <CheckCircle2 className="size-4" />
+                Connect
+              </Button>
+            </div>
+
+          </LabeledField>
+        </CardContent>
+      </Card>
+
+      {/* ── DIRECT API PROVIDERS ── */}
+      <div className="grid gap-6 md:grid-cols-2">
+        <ProviderCredentialCard 
+          provider="openai"
+          label="OpenAI API"
+          icon={<Zap className="size-5 text-emerald-400" />}
+          config={providers?.openai}
+          onUpdate={(patch) => onUpdateProviderConnection("openai", patch)}
+        />
+        <ProviderCredentialCard 
+          provider="anthropic"
+          label="Anthropic API"
+          icon={<Shield className="size-5 text-purple-400" />}
+          config={providers?.anthropic}
+          onUpdate={(patch) => onUpdateProviderConnection("anthropic", patch)}
+        />
+        <ProviderCredentialCard 
+          provider="gemini-api"
+          label="Gemini API"
+          icon={<Sparkles className="size-5 text-blue-400" />}
+          config={providers?.["gemini-api"]}
+          onUpdate={(patch) => onUpdateProviderConnection("gemini-api", patch)}
+        />
+        <ProviderCredentialCard 
+          provider="gemini-cli"
+          label="Gemini CLI"
+          icon={<Terminal className="size-5 text-zinc-400" />}
+          config={providers?.["gemini-cli"]}
+          onUpdate={(patch) => onUpdateProviderConnection("gemini-cli", patch)}
+          hideUrl
+        />
       </div>
+    </div>
+  );
+}
+
+function ProviderCredentialCard({ provider, label, icon, config, onUpdate, hideUrl = false }) {
+  const [apiKey, setApiKey] = useState(config?.apiKey || "");
+  const [baseUrl, setBaseUrl] = useState(config?.baseUrl || "");
+
+  return (
+    <Card className="border-white/6 bg-white/2 backdrop-blur-xl rounded-[20px] overflow-hidden transition-all hover:bg-white/4">
+      <CardHeader className="pb-3">
+        <div className="flex items-center gap-3">
+          <div className="flex size-9 items-center justify-center rounded-lg bg-white/5 border border-white/5">
+            {icon}
+          </div>
+          <CardTitle className="text-sm font-semibold">{label}</CardTitle>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <LabeledField label="Global API Key">
+          <Input 
+            type="password" 
+            placeholder="sk-..." 
+            value={apiKey} 
+            onChange={(e) => setApiKey(e.target.value)}
+            className="h-8 text-xs bg-black/20"
+          />
+        </LabeledField>
+        {!hideUrl && (
+          <LabeledField label="Proxy / Base URL (Optional)">
+            <Input 
+              placeholder="https://..." 
+              value={baseUrl} 
+              onChange={(e) => setBaseUrl(e.target.value)}
+              className="h-8 text-xs bg-black/20"
+            />
+          </LabeledField>
+        )}
+        <Button 
+          size="sm" 
+          variant="secondary" 
+          className="w-full h-8 text-[11px] font-bold uppercase tracking-wider bg-white/5 hover:bg-white/10"
+          onClick={() => onUpdate({ apiKey, baseUrl })}
+        >
+          Save Configuration
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
+
+function OpenCodeConnectionBanner({ opencodeCatalog, groups, onSwitchTab }) {
+  const opencodeGroups = (groups ?? []).filter((g) => g.controller?.provider === "opencode");
+  const healthState = opencodeCatalog?.health_state ?? "not_connected";
+  const needsConnection = opencodeGroups.length > 0 && healthState !== "ready";
+
+  if (!needsConnection) {
+    return null;
+  }
+
+  return (
+    <div className="mb-4 flex items-center justify-between gap-3 rounded-2xl border border-amber-500/20 bg-amber-500/8 px-5 py-4">
+      <div>
+        <p className="text-sm font-medium text-amber-100">
+          {opencodeGroups.length} group{opencodeGroups.length !== 1 ? "s" : ""} use OpenCode, but it's not connected
+        </p>
+        <p className="mt-0.5 text-xs text-amber-200/60">
+          Go to the Connection tab to paste your OpenCode Zen API key first.
+        </p>
+      </div>
+      <Button variant="outline" size="sm" onClick={onSwitchTab} className="shrink-0 border-amber-500/30 text-amber-100 hover:bg-amber-500/10">
+        <Cable className="size-4" />
+        Open Connection
+      </Button>
     </div>
   );
 }
@@ -572,6 +567,10 @@ function formatReadinessState(state) {
 }
 
 function formatOpenCodeStatus(state) {
+  if (state === "runtime_unavailable") return "Runtime blocked";
+  if (state === "network_issue") return "Network issue";
+  if (state === "not_connected") return "Connect Zen";
+  if (state === "rate_limited") return "Rate limited";
   if (state === "hosted_model_unavailable") return "Hosted model blocked";
   if (state === "provider_backed_model_unavailable") return "Provider-backed model blocked";
   if (state === "connected_no_models") return "Connected, no models";
@@ -608,40 +607,69 @@ function buildOpencodeModelLabel(modelId = "") {
   return `${model} (${provider})`;
 }
 
-function describeControllerSetup(provider, readinessState, catalog) {
+function describeControllerSetup(provider, readinessState, catalog, selectedModel = "") {
+  if (provider === "heuristic") {
+    return {
+      title: "Debug controller selected",
+      description: "Heuristic is useful for smoke tests, but it does not represent the enterprise AI flow.",
+      detail: "Choose a real model above if you want the group to use a live provider.",
+    };
+  }
+
   if (provider === "opencode") {
     if (readinessState === "ready") {
       return {
-        title: "OpenCode is ready",
-        description: "Pick the model you want and run the simulation.",
-        detail: catalog?.models_scope ? `Available models come from ${catalog.models_scope === "credential+base" ? "your account plus OpenCode base models" : catalog.models_scope === "base" ? "OpenCode's visible model list" : "the current OpenCode environment"}.` : ""
+        title: "OpenCode model verified",
+        description: "The selected OpenCode model passed runtime verification and can control this group.",
+        detail: selectedModel ? `Selected model: ${buildOpencodeModelLabel(selectedModel)}.` : "",
       };
     }
-    if (readinessState === "model_required") {
+    if (!selectedModel || readinessState === "model_required") {
       return {
         title: "Choose an OpenCode model",
-        description: "Your OpenCode environment is available, but this group still needs a model selection before it can run.",
-        detail: "Pick a hosted model such as MiniMax M2.5 Free or one of your connected provider-backed models."
+        description: "Pick the OpenCode model you want first. GridNomad will then show the exact key or verification step it needs.",
+        detail: "Hosted models like MiniMax M2.5 Free and any models exposed by the OpenCode runtime appear in the browser above.",
+      };
+    }
+    if (readinessState === "not_connected") {
+      return {
+        title: "OpenCode key required",
+        description: "Paste the OpenCode Zen key below, connect it, then verify the selected model.",
+        detail: catalog?.login_hint ?? "",
+      };
+    }
+    if (readinessState === "rate_limited") {
+      return {
+        title: "Selected OpenCode model is rate limited",
+        description: "GridNomad reached OpenCode, but the selected model is currently rate limited.",
+        detail: catalog?.login_hint ?? "",
       };
     }
     if (readinessState === "hosted_model_unavailable") {
       return {
         title: "Selected OpenCode-hosted model is blocked",
-        description: "GridNomad found your selected hosted model, but OpenCode could not run it right now.",
-        detail: catalog?.login_hint ?? ""
+        description: "OpenCode can see the selected hosted model, but it could not run it right now.",
+        detail: catalog?.login_hint ?? "",
       };
     }
     if (readinessState === "provider_backed_model_unavailable") {
       return {
         title: "Selected provider-backed model is blocked",
-        description: "GridNomad found your selected provider-backed model, but OpenCode could not run it right now.",
-        detail: catalog?.login_hint ?? ""
+        description: "OpenCode can see the selected provider-backed model, but it could not run it right now.",
+        detail: catalog?.login_hint ?? "",
+      };
+    }
+    if (readinessState === "runtime_unavailable") {
+      return {
+        title: "Runtime verification failed",
+        description: "The selected OpenCode model did not answer a verification prompt cleanly.",
+        detail: catalog?.decision_probe?.error ?? catalog?.login_hint ?? "",
       };
     }
     return {
-      title: "Connect OpenCode in 2 steps",
-      description: "1. Copy the login command and run it in your terminal. 2. Come back here and press Refresh OpenCode.",
-      detail: catalog?.login_hint ?? ""
+      title: "Verify the selected OpenCode model",
+      description: "The model is chosen, but GridNomad still needs a successful runtime verification before you can run.",
+      detail: catalog?.login_hint ?? "",
     };
   }
 
@@ -649,29 +677,448 @@ function describeControllerSetup(provider, readinessState, catalog) {
     if (readinessState === "ready") {
       return {
         title: "Gemini CLI is ready",
-        description: "Pick the model you want and run the simulation.",
-        detail: ""
+        description: "This group has the model and runtime access it needs.",
+        detail: "",
       };
     }
-    if (readinessState === "model_required") {
+    if (!selectedModel || readinessState === "model_required") {
       return {
         title: "Choose a Gemini model",
-        description: "Gemini CLI is connected, but this group still needs a model selection.",
-        detail: ""
+        description: "Pick the Gemini CLI model you want first.",
+        detail: "",
       };
     }
     return {
-      title: "Connect Gemini CLI in 2 steps",
-      description: "1. Copy the login command and run it in your terminal. 2. Come back here and press Refresh Gemini CLI.",
-      detail: catalog?.login_hint ?? ""
+      title: "Gemini credential required",
+      description: "Either paste a Gemini API key below, or login with Gemini CLI and refresh verification.",
+      detail: catalog?.login_hint ?? "",
+    };
+  }
+
+  if (!selectedModel || readinessState === "model_required") {
+    return {
+      title: "Choose a model",
+      description: "Pick the model that should control every human in this group.",
+      detail: "The credential field will appear automatically after model selection.",
+    };
+  }
+
+  if (readinessState === "missing_api_key") {
+    return {
+      title: "Credential required",
+      description: `Inherit ${providerDisplayName(provider)} key from the Connection tab.`,
+      detail: `Ensure the global API key for ${providerDisplayName(provider)} is configured.`,
+    };
+  }
+
+
+  if (readinessState === "ready") {
+    return {
+      title: `${providerDisplayName(provider)} is ready`,
+      description: "This group has both a selected model and the credential it needs.",
+      detail: "",
     };
   }
 
   return {
     title: `Controller status: ${formatReadinessState(readinessState)}`,
-    description: controllerReadiness({ provider }, catalog).message,
-    detail: ""
+    description: controllerReadiness({ provider, model: selectedModel }, catalog).message,
+    detail: "",
   };
+}
+
+function buildUnifiedModelEntries({ catalog, opencodeCatalog, controller }) {
+  const entries = [];
+  const seen = new Set();
+
+  function addEntry(entry) {
+    const provider = String(entry.provider ?? "").trim();
+    const model = String(entry.model ?? "");
+    const key = `${provider}::${model || "__none__"}`;
+    if (!provider || seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    entries.push({
+      key,
+      provider,
+      model,
+      label: entry.label || model || providerDisplayName(provider),
+      category: entry.category || providerDisplayName(provider),
+      providerLabel: entry.providerLabel || providerDisplayName(provider),
+      sourceType: entry.sourceType || "",
+      sourceBadge: entry.sourceBadge || "",
+      description: entry.description || "",
+      runtimeStatus: entry.runtimeStatus || "",
+    });
+  }
+
+  addEntry({
+    provider: "heuristic",
+    model: "",
+    label: "Heuristic (debug)",
+    category: "Debug",
+    providerLabel: "Heuristic",
+    description: "Local fallback for smoke tests and offline debugging.",
+  });
+
+  const opencodeEntries = Array.isArray(opencodeCatalog?.model_entries) ? opencodeCatalog.model_entries : [];
+  const opencodeEntryMap = new Map();
+  for (const entry of opencodeEntries) {
+    const model = String(entry?.id ?? entry?.model ?? "").trim();
+    if (!model) {
+      continue;
+    }
+    opencodeEntryMap.set(model, entry);
+  }
+
+  for (const model of OPENCODE_ZEN_MODELS) {
+    const entry = opencodeEntryMap.get(model);
+    addEntry({
+      provider: "opencode",
+      model,
+      label: entry?.label || buildOpencodeModelLabel(model),
+      category: "OpenCode runtime",
+      providerLabel: "OpenCode CLI",
+      sourceType: entry?.source_type || "hosted",
+      sourceBadge: entry?.source_type === "provider_backed" ? "Connected provider" : "Hosted by OpenCode",
+      runtimeStatus: entry?.runtime_status || "",
+      description: entry?.source_type === "provider_backed" ? "Runs through OpenCode using a connected provider." : "Runs through the OpenCode Zen runtime.",
+    });
+  }
+
+  for (const entry of opencodeEntries) {
+    const model = String(entry?.id ?? entry?.model ?? "").trim();
+    if (!model) {
+      continue;
+    }
+    addEntry({
+      provider: "opencode",
+      model,
+      label: entry?.label || buildOpencodeModelLabel(model),
+      category: "OpenCode runtime",
+      providerLabel: "OpenCode CLI",
+      sourceType: entry?.source_type || (model.startsWith("opencode/") ? "hosted" : "provider_backed"),
+      sourceBadge: entry?.source_type === "provider_backed" ? "Connected provider" : "Hosted by OpenCode",
+      runtimeStatus: entry?.runtime_status || "",
+      description: entry?.source_type === "provider_backed" ? "Runs through OpenCode using a connected provider." : "Runs through the OpenCode Zen runtime.",
+    });
+  }
+
+  const nativeModelGroups = [
+    {
+      provider: "gemini-cli",
+      category: "Gemini CLI",
+      providerLabel: "Gemini CLI",
+      models: [...GEMINI_MODELS, ...((catalog?.provider === "gemini-cli" ? catalog?.models : []) ?? []), ...((controller?.provider === "gemini-cli" ? controller?.availableModels : []) ?? [])],
+      description: "Uses Gemini CLI login or a Gemini API key for this group.",
+    },
+    {
+      provider: "gemini-api",
+      category: "Gemini API",
+      providerLabel: "Gemini API",
+      models: [...GEMINI_API_MODELS, ...((catalog?.provider === "gemini-api" ? catalog?.models : []) ?? []), ...((controller?.provider === "gemini-api" ? controller?.availableModels : []) ?? [])],
+      description: "Uses a direct Gemini API key.",
+    },
+    {
+      provider: "openai",
+      category: "OpenAI",
+      providerLabel: "OpenAI API",
+      models: [...OPENAI_MODELS, ...((catalog?.provider === "openai" ? catalog?.models : []) ?? []), ...((controller?.provider === "openai" ? controller?.availableModels : []) ?? [])],
+      description: "Uses a direct OpenAI API key.",
+    },
+    {
+      provider: "anthropic",
+      category: "Anthropic",
+      providerLabel: "Anthropic API",
+      models: [...ANTHROPIC_MODELS, ...((catalog?.provider === "anthropic" ? catalog?.models : []) ?? []), ...((controller?.provider === "anthropic" ? controller?.availableModels : []) ?? [])],
+      description: "Uses a direct Anthropic API key.",
+    },
+  ];
+
+  for (const group of nativeModelGroups) {
+    for (const model of Array.from(new Set(group.models.filter(Boolean).map(String)))) {
+      addEntry({
+        provider: group.provider,
+        model,
+        label: model,
+        category: group.category,
+        providerLabel: group.providerLabel,
+        description: group.description,
+      });
+    }
+  }
+
+  return entries;
+}
+
+function assembleControllerEntries(provider, catalog, opencodeCatalog, selectedModel) {
+  const entries = [];
+  
+  if (provider === "heuristic") {
+    entries.push({
+      label: "Internal Heuristic",
+      model: "default",
+      category: "Local Controllers",
+      provider: "heuristic",
+      providerLabel: "Heuristic",
+      description: "Direct algorithmic world-interaction logic with zero latency and no cost.",
+      runtimeStatus: "ready",
+      statusWeight: 10,
+    });
+    return entries;
+  }
+
+  if (provider === "opencode") {
+    const models = opencodeCatalog?.model_entries || [];
+    models.forEach((m) => {
+      entries.push({
+        label: m.label || m.model_id,
+        model: m.model_id,
+        category: "OpenCode Workspace",
+        provider: "opencode",
+        providerLabel: "OpenCode",
+        description: m.description || "Local model hosted via OpenCode Zen.",
+        runtimeStatus: m.status || "unverified",
+        sourceBadge: m.source || "local",
+        statusWeight: m.status === "ready" ? 10 : 5,
+      });
+    });
+    
+    // Add default placeholders if empty
+    if (!entries.length) {
+      OPENCODE_ZEN_MODELS.forEach((m) => {
+        entries.push({
+          label: m.label,
+          model: m.value,
+          category: "Common Models",
+          provider: "opencode",
+          providerLabel: "OpenCode",
+          description: "Model selection placeholder. Connect Zen to see live models.",
+          runtimeStatus: "not_connected",
+          statusWeight: 0,
+        });
+      });
+    }
+    return entries;
+  }
+
+  // Direct APIs
+  const staticModels = provider === "openai" ? OPENAI_MODELS : 
+                       provider === "anthropic" ? ANTHROPIC_MODELS : 
+                       provider === "gemini-api" ? GEMINI_API_MODELS : 
+                       provider === "gemini-cli" ? GEMINI_MODELS : [];
+                       
+  staticModels.forEach((m) => {
+    entries.push({
+      label: m.label,
+      model: m.value,
+      category: `${providerDisplayName(provider)} Standard`,
+      provider: provider,
+      providerLabel: providerDisplayName(provider),
+      description: `Direct connection to ${m.label}.`,
+      runtimeStatus: "ready",
+      statusWeight: 10,
+    });
+  });
+
+  return entries;
+}
+
+
+function describeCredentialPanel(provider, selectedModel, selectedEntry) {
+  if (!selectedModel && provider !== "heuristic") {
+    return "Choose a model first. The correct credential or verification flow will appear automatically.";
+  }
+  if (provider === "opencode") {
+    return "This model runs through OpenCode. Paste the Zen key only when you need to connect or reconnect the shared runtime.";
+  }
+  if (provider === "gemini-cli") {
+    return "You can either paste a Gemini key for this group or use your existing Gemini CLI login.";
+  }
+  if (providerUsesApiKey(provider)) {
+    return `This model uses a direct ${providerDisplayName(provider)} key for this group.`;
+  }
+  if (provider === "heuristic") {
+    return "No credential is required for the local heuristic debug controller.";
+  }
+  return selectedEntry?.description || "Provide the credential required by the selected model.";
+}
+
+function buildApiKeyLabel(provider) {
+  if (provider === "openai") return "OpenAI API key";
+  if (provider === "anthropic") return "Anthropic API key";
+  if (provider === "gemini-api") return "Gemini API key";
+  return "API key";
+}
+
+function describeProviderRoute(provider) {
+  if (provider === "opencode") {
+    return "Connect through OpenCode, then verify the selected OpenCode model.";
+  }
+  if (provider === "gemini-cli") {
+    return "Use Gemini CLI login in your terminal, or provide a Gemini API key for this group.";
+  }
+  if (providerUsesApiKey(provider)) {
+    return `Provide a ${buildApiKeyLabel(provider)} for this group.`;
+  }
+  if (provider === "heuristic") {
+    return "No external connection is required.";
+  }
+  return "Choose the provider first, then connect it.";
+}
+
+function ProviderModelChooser({
+  provider,
+  currentModel,
+  catalog,
+  opencodeCatalog,
+  onSelect,
+}) {
+  const [query, setQuery] = useState("");
+  
+  const entries = useMemo(
+    () => assembleControllerEntries(provider, catalog, opencodeCatalog, currentModel),
+    [provider, catalog, opencodeCatalog, currentModel]
+  );
+  
+  const selectedEntry = entries.find((e) => e.model === currentModel && e.provider === provider);
+
+  const normalizedQuery = query.trim().toLowerCase();
+
+  const filteredEntries = entries.filter((entry) => {
+    if (!normalizedQuery) {
+      return true;
+    }
+    const haystack = [
+      entry.label,
+      entry.model,
+      entry.category,
+      entry.providerLabel,
+      entry.description,
+      entry.sourceBadge,
+    ].join(" ").toLowerCase();
+    return haystack.includes(normalizedQuery);
+  });
+
+  const groupedEntries = filteredEntries.reduce((accumulator, entry) => {
+    if (!accumulator.has(entry.category)) {
+      accumulator.set(entry.category, []);
+    }
+    accumulator.get(entry.category).push(entry);
+    return accumulator;
+  }, new Map());
+
+  return (
+    <div className="grid gap-2">
+      <span className="text-[11px] uppercase tracking-[0.18em] text-zinc-500">Model</span>
+      <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-sm font-medium text-zinc-100">
+              {selectedEntry?.label || value || "No model selected"}
+            </p>
+            <p className="mt-1 text-xs leading-5 text-zinc-500">
+              {selectedEntry
+                ? `${selectedEntry.providerLabel} will control every human in this group using ${selectedEntry.label}.`
+                : `Choose the ${providerDisplayName(provider)} model that should control this group.`}
+            </p>
+          </div>
+          <Badge variant="outline" className="text-[10px]">
+            {selectedEntry?.providerLabel ?? providerDisplayName(provider)}
+          </Badge>
+        </div>
+
+        <div className="relative mt-4">
+          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-zinc-500" />
+          <Input
+            value={query}
+            placeholder="Search by model, provider, or runtime"
+            onChange={(event) => onQueryChange(event.target.value)}
+            className="pl-9"
+          />
+        </div>
+
+        <ScrollArea className="mt-3 h-64 rounded-xl border border-white/10 bg-black/20">
+          <div className="p-2">
+            {!filteredEntries.length ? (
+              <div className="rounded-xl px-3 py-3 text-sm text-zinc-500">
+                No models match this search.
+              </div>
+            ) : null}
+            {Array.from(groupedEntries.entries()).map(([category, groupEntries]) => (
+              <ModelCategorySection
+                key={category}
+                title={category}
+                entries={groupEntries}
+                selectedProvider={provider}
+                selectedModel={value}
+                onSelect={onSelect}
+              />
+            ))}
+          </div>
+        </ScrollArea>
+      </div>
+    </div>
+  );
+}
+
+function ModelCategorySection({ title, entries, selectedProvider, selectedModel, onSelect }) {
+  if (!entries.length) {
+    return null;
+  }
+  return (
+    <div className="mb-3">
+      <p className="mb-2 px-2 text-[10px] uppercase tracking-[0.18em] text-zinc-500">{title}</p>
+      {entries.map((entry) => {
+        const active = entry.provider === selectedProvider && entry.model === selectedModel;
+        return (
+          <button
+            key={entry.key}
+            type="button"
+            onClick={() => onSelect(entry.provider, entry.model)}
+            className={`mb-1 flex w-full items-start justify-between rounded-xl px-3 py-3 text-left transition-colors ${
+              active
+                ? "bg-white/[0.12] text-white"
+                : "text-zinc-300 hover:bg-white/[0.06] hover:text-white"
+            }`}
+          >
+            <div className="pr-3">
+              <div className="break-all text-sm font-medium">{entry.label}</div>
+              <p className="mt-1 text-xs leading-5 text-zinc-500">{entry.description}</p>
+              <div className="mt-2 flex flex-wrap gap-1">
+                <Badge variant="muted" className="text-[10px]">
+                  {entry.providerLabel}
+                </Badge>
+                {entry.sourceBadge ? (
+                  <Badge variant="outline" className="text-[10px]">
+                    {entry.sourceBadge}
+                  </Badge>
+                ) : null}
+                {entry.runtimeStatus && entry.runtimeStatus !== "unverified" ? (
+                  <Badge
+                    variant="outline"
+                    className={`text-[10px] ${
+                      entry.runtimeStatus === "ready"
+                        ? "border-emerald-500/30 text-emerald-100"
+                        : "border-amber-500/30 text-amber-100"
+                    }`}
+                  >
+                    {entry.provider === "opencode" ? formatOpenCodeStatus(entry.runtimeStatus) : formatReadinessState(entry.runtimeStatus)}
+                  </Badge>
+                ) : null}
+              </div>
+            </div>
+            {active ? (
+              <Badge variant="outline" className="shrink-0 text-[10px]">
+                Selected
+              </Badge>
+            ) : null}
+          </button>
+        );
+      })}
+    </div>
+  );
 }
 
 function HumanRosterEditor({ group, onUpdateHuman, nameValidation, onRegenerateDuplicateNames }) {
@@ -695,9 +1142,9 @@ function HumanRosterEditor({ group, onUpdateHuman, nameValidation, onRegenerateD
     <div className="space-y-3">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h4 className="text-base font-semibold text-zinc-100">Humans</h4>
+          <h4 className="text-base font-semibold text-zinc-100">Identity & Personas</h4>
           <p className="text-sm text-zinc-400">
-            Each person gets a generated persona before any emergent role takes shape. Pick one human at a time to refine the identity hints the controller sees.
+            Review and customize the traits that shape each human's AI decision-making.
           </p>
         </div>
         <Badge variant="outline" className="text-[10px]">
@@ -706,10 +1153,10 @@ function HumanRosterEditor({ group, onUpdateHuman, nameValidation, onRegenerateD
       </div>
 
       <div className="grid gap-4 lg:grid-cols-[260px_minmax(0,1fr)]">
-        <div className="rounded-2xl border border-white/10 bg-white/[0.03]">
+        <div className="rounded-2xl border border-white/4 bg-white/3">
           <div className="border-b border-white/10 px-4 py-3">
             <p className="text-xs font-medium text-zinc-200">Roster</p>
-            <p className="text-[11px] text-zinc-500">Click a person to edit their persona.</p>
+            <p className="text-[11px] text-zinc-500">Select a human from the roster to customize their behavior.</p>
           </div>
           <ScrollArea className="h-[320px]">
             <div className="space-y-2 p-3">
@@ -755,7 +1202,7 @@ function HumanRosterEditor({ group, onUpdateHuman, nameValidation, onRegenerateD
         </div>
 
         {selectedHuman ? (
-          <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+          <div className="rounded-2xl border border-white/4 bg-white/3 p-4">
             <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
               <div>
                 <p className="text-sm font-semibold text-zinc-100">{selectedHuman.name}</p>
@@ -826,116 +1273,10 @@ function HumanRosterEditor({ group, onUpdateHuman, nameValidation, onRegenerateD
 
 function InlineCommand({ label, value }) {
   return (
-    <div className="rounded-lg border border-white/10 bg-white/[0.03] p-2">
+    <div className="rounded-lg border border-white/10 bg-white/3 p-2">
+
       <p className="mb-1 text-[9px] uppercase tracking-[0.18em] text-zinc-500">{label}</p>
       <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-[10px] leading-4 text-zinc-300">{value || "Unavailable"}</pre>
-    </div>
-  );
-}
-
-function ModelChooser({ label, provider, models, modelEntries = [], value, query, onQueryChange, onSelect }) {
-  const filteredModels = useMemo(() => {
-    const normalizedQuery = query.trim().toLowerCase();
-    const pool = Array.from(new Set(models.filter(Boolean)));
-    if (!normalizedQuery) {
-      return pool;
-    }
-    return pool.filter((model) => model.toLowerCase().includes(normalizedQuery));
-  }, [models, query]);
-  const entryById = useMemo(() => new Map(modelEntries.map((entry) => [entry.id, entry])), [modelEntries]);
-  const hostedModels = filteredModels.filter((model) => (entryById.get(model)?.source_type ?? "") === "hosted");
-  const providerBackedModels = filteredModels.filter((model) => (entryById.get(model)?.source_type ?? "") === "provider_backed");
-  const otherModels = filteredModels.filter((model) => !hostedModels.includes(model) && !providerBackedModels.includes(model));
-
-  const selectedLabel = value || "No model selected";
-  const providerLabel = providerDisplayName(provider);
-
-  return (
-    <div className="grid gap-2">
-      <span className="text-[11px] uppercase tracking-[0.18em] text-zinc-500">{label}</span>
-      <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <p className="text-sm font-medium text-zinc-100">{selectedLabel}</p>
-            <p className="text-xs text-zinc-500">{providerLabel} controls every human in this group with this model.</p>
-          </div>
-          {value ? (
-            <Button variant="ghost" size="sm" onClick={() => onSelect("")}>Clear</Button>
-          ) : null}
-        </div>
-        <div className="relative mt-3">
-          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-zinc-500" />
-          <Input
-            value={query}
-            placeholder="Search models"
-            onChange={(event) => onQueryChange(event.target.value)}
-            className="pl-9"
-          />
-        </div>
-        <ScrollArea className="mt-3 h-48 rounded-xl border border-white/10 bg-black/20">
-          <div className="p-2">
-            {!filteredModels.length ? (
-              <div className="rounded-xl px-3 py-2 text-sm text-zinc-500">No models match this search.</div>
-            ) : null}
-            <ModelSection title="OpenCode-hosted" models={hostedModels} entryById={entryById} value={value} onSelect={onSelect} />
-            <ModelSection title="Connected provider models" models={providerBackedModels} entryById={entryById} value={value} onSelect={onSelect} />
-            <ModelSection title="Other models" models={otherModels} entryById={entryById} value={value} onSelect={onSelect} />
-          </div>
-        </ScrollArea>
-      </div>
-    </div>
-  );
-}
-
-function ModelSection({ title, models, entryById, value, onSelect }) {
-  if (!models.length) {
-    return null;
-  }
-  return (
-    <div className="mb-3">
-      <p className="mb-2 px-2 text-[10px] uppercase tracking-[0.18em] text-zinc-500">{title}</p>
-      {models.map((model) => {
-        const active = model === value;
-        const entry = entryById.get(model);
-        return (
-          <button
-            key={model}
-            type="button"
-            onClick={() => onSelect(model)}
-            className={`mb-1 flex w-full items-start justify-between rounded-xl px-3 py-2 text-left text-sm transition-colors ${
-              active
-                ? "bg-white/[0.12] text-white"
-                : "text-zinc-300 hover:bg-white/[0.06] hover:text-white"
-            }`}
-          >
-            <div className="pr-3">
-              <div className="break-all">{entry?.label || model}</div>
-              <div className="mt-1 flex flex-wrap gap-1">
-                {entry?.source_type ? (
-                  <Badge variant="muted" className="text-[10px]">
-                    {entry.source_type === "hosted" ? "Hosted by OpenCode" : entry.source_type === "provider_backed" ? "From connected provider" : "Unknown source"}
-                  </Badge>
-                ) : null}
-                {entry?.runtime_status && entry.runtime_status !== "unverified" ? (
-                  <Badge variant="outline" className={`text-[10px] ${entry.runtime_status === "ready" ? "border-emerald-500/30 text-emerald-100" : "border-amber-500/30 text-amber-100"}`}>
-                    {formatOpenCodeStatus(entry.runtime_status)}
-                  </Badge>
-                ) : null}
-              </div>
-            </div>
-            {active ? <Badge variant="outline" className="shrink-0 text-[10px]">Selected</Badge> : null}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
-function WizardStep({ label, text, active, complete }) {
-  return (
-    <div className={`rounded-xl border px-3 py-3 text-xs ${complete ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-100" : active ? "border-white/20 bg-white/[0.05] text-zinc-100" : "border-white/10 bg-black/20 text-zinc-500"}`}>
-      <p className="font-medium">{label}</p>
-      <p className="mt-1 leading-5">{text}</p>
     </div>
   );
 }

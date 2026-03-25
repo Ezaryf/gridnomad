@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   Bot,
   ChevronLeft,
@@ -58,16 +59,6 @@ const INITIAL_OVERLAYS = {
   structures: true
 };
 
-const PROVIDER_LIST = [
-  { value: "heuristic", label: "Heuristic" },
-  { value: "gemini-cli", label: "Gemini CLI" },
-  { value: "gemini-api", label: "Gemini API" },
-  { value: "openai", label: "OpenAI" },
-  { value: "anthropic", label: "Anthropic" },
-  { value: "opencode", label: "OpenCode" }
-];
-
-
 export default function GridNomadDashboard() {
   const [templateScenario, setTemplateScenario] = useState(null);
   const [settings, setSettings] = useState({ world: {}, groups: [] });
@@ -78,6 +69,7 @@ export default function GridNomadDashboard() {
   const [debugLines, setDebugLines] = useState([]);
   const [statusMessage, setStatusMessage] = useState("Set up groups, assign controllers, and stream.");
   const [providerCatalogs, setProviderCatalogs] = useState({});
+  const [opencodeZenKeyDraft, setOpencodeZenKeyDraft] = useState("");
   const [sheetOpen, setSheetOpen] = useState(false);
   const [sheetTab, setSheetTab] = useState("groups");
   const [selectedTile, setSelectedTile] = useState(null);
@@ -100,6 +92,14 @@ export default function GridNomadDashboard() {
   const [rightOpen, setRightOpen] = useState(true);
   const abortRef = useRef(null);
   const frameQueueRef = useRef([]);
+
+  function isOpencodeConnectionEnabled(payload) {
+    return Boolean(
+      payload?.connection_completed
+      || payload?.has_stored_credential
+      || ["ready", "model_required", "rate_limited", "connected_no_models", "runtime_unavailable", "hosted_model_unavailable", "provider_backed_model_unavailable", "network_issue", "login_required", "broken_environment"].includes(payload?.health_state)
+    );
+  }
 
   const scenario = useMemo(() => {
     if (!templateScenario) return null;
@@ -152,6 +152,7 @@ export default function GridNomadDashboard() {
       const normalized = normalizeSettings(payload.templateScenario, payload.settings);
       setTemplateScenario(payload.templateScenario);
       setSettings(normalized);
+      await refreshOpencodeZenConnection({ silent: true });
       await refreshProviderCatalogs(normalized, true);
       if (payload.preview) {
         setWorld(payload.preview);
@@ -172,23 +173,28 @@ export default function GridNomadDashboard() {
   async function refreshProviderCatalog(scope, entityId, provider, { credential = "", cliHome = "", googleCloudProject = "", model = "", silent = false } = {}) {
     try {
       const params = new URLSearchParams({ provider });
-      if (credential) params.set("credential", credential);
-      if (cliHome) params.set("cliHome", cliHome);
+      
+      // Fallback to global credential if not provided and not opencode
+      let effectiveCredential = credential;
+      if (!effectiveCredential && provider !== "opencode" && provider !== "heuristic") {
+        effectiveCredential = settings.providers?.[provider]?.apiKey ?? "";
+      }
+
+      if (effectiveCredential) params.set("credential", effectiveCredential);
+      if (cliHome && provider !== "opencode") params.set("cliHome", cliHome);
       if (googleCloudProject) params.set("googleCloudProject", googleCloudProject);
       if (model) params.set("model", model);
       const response = await fetch(`/api/providers/catalog?${params.toString()}`, { cache: "no-store" });
       const payload = await response.json();
       setProviderCatalogs((c) => ({ ...c, [catalogKey(scope, entityId)]: payload }));
+
       if (scope === "group") {
         const controllerPatch = {
           availableModels: payload.models ?? [],
           supportsModelListing: Boolean(payload.supports_model_listing),
           supportsManualModelEntry: Boolean(payload.supports_manual_model_entry),
           ...(provider === "opencode"
-            ? {
-                cliHome: payload.resolved_cli_home ?? payload.cli_home_root ?? cliHome ?? "",
-                managedHomeId: payload.managed_home_id ?? settings.groups.find((item) => item.id === entityId)?.controller?.managedHomeId ?? "",
-              }
+            ? {}
             : { cliHome: "", managedHomeId: "" })
         };
         patchGroupController(entityId, controllerPatch);
@@ -216,6 +222,22 @@ export default function GridNomadDashboard() {
   }
 
   async function refreshProviderCatalogs(nextSettings, silent = false) {
+    if ((nextSettings.groups ?? []).some((group) => (group.controller?.provider ?? "heuristic") === "opencode") || nextSettings.opencode_connection?.enabled) {
+      await refreshOpencodeZenConnection({ silent: true });
+    }
+
+    // Refresh global catalogs for configured providers
+    const providersToRefresh = Object.entries(nextSettings.providers ?? {})
+      .filter(([p, config]) => config.apiKey || (p === "gemini-cli"))
+      .map(([p]) => p);
+    
+    for (const provider of providersToRefresh) {
+      await refreshProviderCatalog("global", provider, provider, {
+        credential: nextSettings.providers[provider].apiKey,
+        silent: true
+      });
+    }
+
     for (const group of nextSettings.groups ?? []) {
       const provider = group.controller?.provider ?? "heuristic";
       if (provider === "heuristic") {
@@ -223,14 +245,15 @@ export default function GridNomadDashboard() {
         continue;
       }
       await refreshProviderCatalog("group", group.id, provider, {
-        credential: group.controller?.opencodeProvider ?? "",
-        cliHome: group.controller?.cliHome ?? "",
+        credential: provider === "opencode" ? "" : (nextSettings.providers?.[provider]?.apiKey ?? ""),
+        cliHome: provider === "opencode" ? "" : (group.controller?.cliHome ?? ""),
         googleCloudProject: group.controller?.googleCloudProject ?? "",
         model: group.controller?.model ?? "",
         silent
       });
     }
   }
+
 
   async function saveSettings(nextSettings = settings, silent = false) {
     const validation = humanNameValidation(nextSettings);
@@ -453,6 +476,15 @@ export default function GridNomadDashboard() {
   function pushStatus(type, message, tick = null, time_ms = null) { setStatusItems((c) => [...c, { type, message, tick, time_ms }]); }
   function pushDebug(type, message, tick = null) { setDebugLines((c) => [...c, { type, message, tick }]); }
   function patchWorld(patch) { setSettings((c) => ({ ...c, world: { ...c.world, ...patch } })); }
+  function patchOpencodeConnection(patch) {
+    setSettings((current) => ({
+      ...current,
+      opencode_connection: {
+        ...(current.opencode_connection ?? {}),
+        ...patch,
+      }
+    }));
+  }
 
   function patchGroup(groupId, patch) {
     if (!templateScenario) return;
@@ -462,6 +494,30 @@ export default function GridNomadDashboard() {
     if (!templateScenario) return;
     setSettings((c) => updateGroupController(c, templateScenario, groupId, patch));
   }
+
+  function patchProviders(patch) {
+    setSettings((current) => ({
+      ...current,
+      providers: {
+        ...(current.providers ?? {}),
+        ...patch,
+      }
+    }));
+  }
+
+  function patchProviderConnection(provider, patch) {
+    setSettings((current) => ({
+      ...current,
+      providers: {
+        ...(current.providers ?? {}),
+        [provider]: {
+          ...(current.providers?.[provider] ?? {}),
+          ...patch,
+        }
+      }
+    }));
+  }
+
   function patchHuman(groupId, humanId, patch) {
     setSettings((current) => ({
       ...current,
@@ -493,18 +549,49 @@ export default function GridNomadDashboard() {
       availableModels: [],
       supportsModelListing: false,
       supportsManualModelEntry: false,
-      ...(provider === "opencode" ? { executionMode: "group_batch" } : { opencodeProvider: "", cliHome: "", managedHomeId: "", executionMode: "per_human" })
+      ...(provider === "opencode" ? { executionMode: "group_batch", opencodeProvider: "", cliHome: "", managedHomeId: "" } : { opencodeProvider: "", cliHome: "", managedHomeId: "", executionMode: "per_human" })
     });
     const group = settings.groups.find((i) => i.id === groupId);
     if (provider !== "heuristic") {
+      if (provider === "opencode") {
+        await refreshOpencodeZenConnection({ silent: true });
+      }
       await refreshProviderCatalog("group", groupId, provider, {
-        credential: group?.controller?.opencodeProvider ?? "",
-        cliHome: group?.controller?.cliHome ?? "",
+        credential: provider === "opencode" ? "" : (settings.providers?.[provider]?.apiKey ?? ""),
+        cliHome: provider === "opencode" ? "" : (group?.controller?.cliHome ?? ""),
         googleCloudProject: group?.controller?.googleCloudProject ?? "",
         model: group?.controller?.model ?? "",
       });
     }
   }
+
+  async function updateProviderConnection(provider, patch) {
+    patchProviderConnection(provider, patch);
+    const nextSettings = {
+      ...settings,
+      providers: {
+        ...settings.providers,
+        [provider]: {
+          ...(settings.providers?.[provider] ?? {}),
+          ...patch
+        }
+      }
+    };
+    await refreshProviderCatalog("global", provider, provider, {
+      credential: patch.apiKey ?? settings.providers?.[provider]?.apiKey ?? "",
+      silent: true
+    });
+    // Also refresh all groups using this provider
+    for (const group of settings.groups) {
+      if (group.controller?.provider === provider) {
+        await refreshProviderCatalog("group", group.id, provider, {
+          credential: patch.apiKey ?? settings.providers?.[provider]?.apiKey ?? "",
+          silent: true
+        });
+      }
+    }
+  }
+
 
   async function handleProviderCredentialChange(groupId, credential) {
     patchGroupController(groupId, { opencodeProvider: credential });
@@ -523,10 +610,38 @@ export default function GridNomadDashboard() {
     if (provider === "heuristic") {
       return;
     }
+    if (provider === "opencode") {
+      await refreshOpencodeZenConnection({ model, silent: true });
+    }
     await refreshProviderCatalog("group", groupId, provider, {
-      credential: group?.controller?.opencodeProvider ?? "",
-      cliHome: group?.controller?.cliHome ?? "",
+      credential: provider === "opencode" ? "" : (group?.controller?.opencodeProvider ?? ""),
+      cliHome: provider === "opencode" ? "" : (group?.controller?.cliHome ?? ""),
       googleCloudProject: group?.controller?.googleCloudProject ?? "",
+      model,
+      silent: true,
+    });
+  }
+
+  async function handleControllerModelSelection(groupId, provider, model) {
+    patchGroupController(groupId, {
+      provider,
+      model,
+      availableModels: [],
+      supportsModelListing: false,
+      supportsManualModelEntry: false,
+      ...(provider === "opencode"
+        ? { executionMode: "group_batch", opencodeProvider: "", cliHome: "", managedHomeId: "" }
+        : { executionMode: "per_human", opencodeProvider: "", cliHome: "", managedHomeId: "" })
+    });
+    if (provider === "heuristic") {
+      return;
+    }
+    if (provider === "opencode") {
+      await refreshOpencodeZenConnection({ model, silent: true });
+    }
+    await refreshProviderCatalog("group", groupId, provider, {
+      credential: "",
+      cliHome: "",
       model,
       silent: true,
     });
@@ -583,6 +698,120 @@ export default function GridNomadDashboard() {
     }
   }
 
+  async function refreshOpencodeZenConnection({ model = "", silent = false } = {}) {
+    try {
+      const params = new URLSearchParams();
+      if (model) params.set("model", model);
+      const response = await fetch(`/api/providers/opencode/verify?${params.toString()}`, { cache: "no-store" });
+      const payload = await response.json();
+      setProviderCatalogs((current) => ({ ...current, [catalogKey("global", "opencode")]: payload }));
+      patchOpencodeConnection({
+        enabled: isOpencodeConnectionEnabled(payload),
+        storage_target: payload.storage_target ?? settings.opencode_connection?.storage_target ?? "",
+        cli_home: payload.cli_home ?? payload.resolved_cli_home ?? "",
+        health_state: payload.health_state ?? "not_connected",
+        connected_provider: payload.connected_provider ?? "opencode",
+        last_verified_at: payload.last_probe_at ?? "",
+      });
+      if (!silent) {
+        pushStatus("provider", `OpenCode Zen ${payload.health_state ?? "status"} · ${payload.models?.length ?? 0} models.`);
+        if (payload.stderr) pushDebug("provider", payload.stderr);
+      }
+      return payload;
+    } catch (error) {
+      if (!silent) {
+        pushStatus("error", "Could not verify OpenCode Zen.");
+      }
+      pushDebug("provider", String(error));
+      return null;
+    }
+  }
+
+  async function connectOpencodeZen(model = "") {
+    const apiKey = opencodeZenKeyDraft.trim();
+    if (!apiKey) {
+      pushStatus("error", "Paste an OpenCode Zen API key first.");
+      setStatusMessage("Paste an OpenCode Zen API key first.");
+      return;
+    }
+    setWorking(true);
+    try {
+      const response = await fetch("/api/providers/opencode/connect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apiKey, model }),
+      });
+      const payload = await response.json();
+      setProviderCatalogs((current) => ({ ...current, [catalogKey("global", "opencode")]: payload }));
+      patchOpencodeConnection({
+        enabled: isOpencodeConnectionEnabled(payload),
+        storage_target: payload.storage_target ?? settings.opencode_connection?.storage_target ?? "",
+        cli_home: payload.cli_home ?? payload.resolved_cli_home ?? "",
+        health_state: payload.health_state ?? "connection_failed",
+        connected_provider: payload.connected_provider ?? "opencode",
+        last_verified_at: payload.last_probe_at ?? "",
+      });
+      if (!response.ok || payload.ok === false) {
+        throw new Error(payload.message ?? payload.login_hint ?? "Could not connect OpenCode Zen.");
+      }
+      setOpencodeZenKeyDraft("");
+      pushStatus("provider", payload.message ?? "OpenCode Zen connected.");
+      setStatusMessage(payload.message ?? "OpenCode Zen connected.");
+      await refreshProviderCatalogs({
+        ...settings,
+        opencode_connection: {
+          ...(settings.opencode_connection ?? {}),
+          enabled: isOpencodeConnectionEnabled(payload),
+          cli_home: payload.cli_home ?? payload.resolved_cli_home ?? "",
+          health_state: payload.health_state ?? "connected",
+          connected_provider: payload.connected_provider ?? "opencode",
+          last_verified_at: payload.last_probe_at ?? "",
+          storage_target: payload.storage_target ?? settings.opencode_connection?.storage_target ?? "",
+        }
+      }, true);
+    } catch (error) {
+      pushStatus("error", String(error));
+      pushDebug("provider", String(error));
+      setStatusMessage(String(error));
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  async function disconnectOpencodeZen() {
+    setWorking(true);
+    try {
+      const response = await fetch("/api/providers/opencode/disconnect", { method: "POST" });
+      const payload = await response.json();
+      setProviderCatalogs((current) => ({ ...current, [catalogKey("global", "opencode")]: payload }));
+      patchOpencodeConnection({
+        enabled: false,
+        storage_target: payload.storage_target ?? settings.opencode_connection?.storage_target ?? "",
+        cli_home: payload.cli_home ?? "",
+        health_state: payload.health_state ?? "not_connected",
+        connected_provider: payload.connected_provider ?? "opencode",
+        last_verified_at: payload.last_probe_at ?? "",
+      });
+      pushStatus("provider", payload.message ?? "OpenCode Zen disconnected.");
+      setStatusMessage(payload.message ?? "OpenCode Zen disconnected.");
+      await refreshProviderCatalogs({
+        ...settings,
+        opencode_connection: {
+          ...(settings.opencode_connection ?? {}),
+          enabled: false,
+          cli_home: payload.cli_home ?? "",
+          health_state: payload.health_state ?? "not_connected",
+          last_verified_at: payload.last_probe_at ?? "",
+        }
+      }, true);
+    } catch (error) {
+      pushStatus("error", String(error));
+      pushDebug("provider", String(error));
+    } finally {
+      setWorking(false);
+    }
+  }
+
   async function copyCommand(label, commandText) {
     if (!commandText) {
       pushStatus("error", `${label} is unavailable right now.`);
@@ -621,7 +850,12 @@ export default function GridNomadDashboard() {
     <div className="flex h-dvh w-dvw flex-col overflow-hidden bg-black text-zinc-100">
 
       {/* ── TOOLBAR ── */}
-      <header className="flex h-14 items-center gap-4 border-b border-white/20 bg-black/40 px-4 shadow-[0_8px_32px_rgba(0,0,0,0.1)] backdrop-blur-[10px] backdrop-saturate-180">
+      <motion.header 
+        initial={{ y: -20, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }} 
+        className="flex h-16 items-center gap-4 border-b border-white/4 bg-[#000000]/80 px-6 backdrop-blur-2xl backdrop-saturate-[1.2] shadow-[0_4px_32px_rgba(0,0,0,0.5)] z-20 sticky top-0"
+      >
         <div className="flex items-center gap-2">
           <Button variant="ghost" size="icon" className="size-8 rounded-lg" onClick={() => setLeftOpen((o) => !o)} title="Toggle groups panel">
             <PanelLeft className="size-4" />
@@ -696,7 +930,7 @@ export default function GridNomadDashboard() {
             <PanelRight className="size-4" />
           </Button>
         </div>
-      </header>
+      </motion.header>
 
       {!readiness.ready ? (
         <div className="border-b border-amber-500/20 bg-amber-500/10 px-4 py-2">
@@ -738,9 +972,16 @@ export default function GridNomadDashboard() {
       <div className="flex min-h-0 flex-1">
 
         {/* LEFT SIDEBAR — Groups */}
-        {leftOpen && (
-          <aside className="flex w-[300px] shrink-0 flex-col border-r border-white/20 bg-[rgba(4,4,4,0.96)]">
-            <div className="flex items-center justify-between border-b border-white/20 px-3 py-2">
+        <AnimatePresence>
+          {leftOpen && (
+            <motion.aside 
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20, width: 0, overflow: "hidden" }}
+              transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+              className="flex w-[320px] shrink-0 flex-col border-r border-white/6 bg-[#030303] z-10 shadow-[4px_0_24px_rgba(0,0,0,0.4)]"
+            >
+              <div className="flex items-center justify-between border-b border-white/6 px-4 py-3">
               <span className="text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-400">Groups</span>
               <div className="flex items-center gap-1">
                 <Button variant="ghost" size="icon" className="size-7" onClick={addHumanGroup} disabled={busy} title="Add group"><Plus className="size-3.5" /></Button>
@@ -763,13 +1004,20 @@ export default function GridNomadDashboard() {
                         <span className="ml-1 text-[9px] uppercase leading-none tracking-[0.15em] text-zinc-400/90">Pop</span>
                         <Input type="number" min="1" max="24" className="h-8 px-3 py-1.5 text-xs shadow-none" value={group.population_count} onChange={(e) => patchGroup(group.id, { population_count: Number(e.target.value) })} />
                       </label>
-                      <label className="grid gap-1.5">
-                        <span className="ml-1 text-[9px] uppercase leading-none tracking-[0.15em] text-zinc-400/90">Controller</span>
-                        <Select value={group.controller?.provider ?? "heuristic"} onValueChange={(v) => handleProviderChange(group.id, v)}>
-                          <SelectTrigger className="h-8 px-3 py-1.5 text-xs shadow-none"><SelectValue /></SelectTrigger>
-                          <SelectContent>{PROVIDER_LIST.map((o) => <SelectItem key={o.value} value={o.value} className="text-xs">{o.label}</SelectItem>)}</SelectContent>
-                        </Select>
-                      </label>
+                      <div className="grid gap-1.5">
+                        <span className="ml-1 text-[9px] uppercase leading-none tracking-[0.15em] text-zinc-400/90">Model</span>
+                        <button
+                          type="button"
+                          className="flex h-8 items-center rounded-lg border border-white/10 bg-black/20 px-3 py-1.5 text-left text-xs text-zinc-300 hover:border-white/20 hover:bg-white/[0.04]"
+                          onClick={() => { setSheetTab("groups"); setSheetOpen(true); }}
+                        >
+                          <span className="truncate">
+                            {group.controller?.model
+                              ? `${group.controller.model} · ${providerDisplayName(group.controller?.provider ?? "heuristic")}`
+                              : "Choose model and credential"}
+                          </span>
+                        </button>
+                      </div>
                     </div>
                     {readiness.groups?.find((entry) => entry.id === group.id)?.state !== "ready" ? (
                       <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-2.5 text-[11px] leading-relaxed text-amber-100">
@@ -782,15 +1030,16 @@ export default function GridNomadDashboard() {
                       </div>
                     ) : (
                       <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-3 py-2.5 text-[11px] font-medium leading-relaxed text-emerald-100">
-                        Ready to run with {providerDisplayName(group.controller?.provider ?? "heuristic")}.
+                        Ready to run with {group.controller?.model || providerDisplayName(group.controller?.provider ?? "heuristic")}.
                       </div>
                     )}
                   </article>
                 ))}
               </div>
             </ScrollArea>
-          </aside>
+          </motion.aside>
         )}
+        </AnimatePresence>
 
         {/* CENTER — Map + Console */}
         <div className="flex min-w-0 flex-1 flex-col bg-black">
@@ -808,8 +1057,13 @@ export default function GridNomadDashboard() {
                 onSelectHuman={handleSelectHuman}
               />
             ) : (
-              <div className="flex h-full flex-col items-center justify-center bg-[linear-gradient(rgba(255,255,255,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.03)_1px,transparent_1px)] bg-size-[40px_40px] text-zinc-500">
-                <div className="flex flex-col items-center gap-4 rounded-xl border border-white/10 bg-black/40 p-8 backdrop-blur-md">
+              <div className="flex h-full flex-col items-center justify-center bg-[linear-gradient(rgba(255,255,255,0.02)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.02)_1px,transparent_1px)] bg-size-[60px_60px] text-zinc-500">
+                <motion.div 
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
+                  className="flex flex-col items-center gap-4 rounded-[24px] border border-white/5 bg-black/40 p-10 backdrop-blur-3xl shadow-[0_16px_64px_rgba(0,0,0,0.5)]"
+                >
                   <div className="flex size-16 items-center justify-center rounded-full border border-dashed border-white/20 bg-white/5">
                     <Grid3x3 className="size-8 text-zinc-400" />
                   </div>
@@ -822,20 +1076,22 @@ export default function GridNomadDashboard() {
                   <Button variant="outline" className="mt-2 h-8 border-white/10 bg-white/5 text-xs hover:bg-white/10" onClick={() => generateWorld()} disabled={busy}>
                     Generate Map Blueprint
                   </Button>
-                </div>
+                </motion.div>
               </div>
             )}
             
-            {cameraLocked && inspector?.selectedHuman && (
-              <ThoughtStream 
-                human={inspector.selectedHuman}
-                group={groupLabel(scenario, inspector.selectedHuman.faction_id)}
-                isLocked={cameraLocked}
-                onToggleLock={() => setCameraLocked(l => !l)}
-              />
-            )}
+            <AnimatePresence>
+              {cameraLocked && inspector?.selectedHuman && (
+                <ThoughtStream 
+                  human={inspector.selectedHuman}
+                  group={groupLabel(scenario, inspector.selectedHuman.faction_id)}
+                  isLocked={cameraLocked}
+                  onToggleLock={() => setCameraLocked(l => !l)}
+                />
+              )}
+            </AnimatePresence>
           </main>
-          <div className="h-[220px] shrink-0 border-t border-white/20 bg-[rgba(4,4,4,0.96)]">
+          <div className="h-[220px] shrink-0 border-t border-white/6 bg-[#030303]">
             <SimulationConsole
               activityItems={activityItems}
               statusItems={statusItems}
@@ -848,8 +1104,15 @@ export default function GridNomadDashboard() {
         </div>
 
         {/* RIGHT SIDEBAR — Inspector + Console */}
-        {rightOpen && (
-          <aside className="flex w-[340px] shrink-0 flex-col border-l border-white/20 bg-[rgba(4,4,4,0.96)]">
+        <AnimatePresence>
+          {rightOpen && (
+            <motion.aside 
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 20, width: 0, overflow: "hidden" }}
+              transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+              className="flex w-[360px] shrink-0 flex-col border-l border-white/6 bg-[#030303] z-10 shadow-[-4px_0_24px_rgba(0,0,0,0.4)]"
+            >
       <div className="min-h-0 flex-1">
               <InspectorTabs
                 scenario={scenario}
@@ -869,12 +1132,18 @@ export default function GridNomadDashboard() {
                 onToggleCameraLock={() => setCameraLocked(l => !l)}
               />
             </div>
-          </aside>
-        )}
+            </motion.aside>
+          )}
+        </AnimatePresence>
       </div>
 
       {/* ── STATUS BAR ── */}
-      <footer className="flex h-8 items-center gap-2 border-t border-white/20 bg-black/40 px-4 text-[10px] backdrop-blur-[10px] backdrop-saturate-180">
+      <motion.footer 
+        initial={{ y: 20, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
+        className="flex h-10 items-center gap-2 border-t border-white/4 bg-[#000000]/80 px-6 text-[10px] backdrop-blur-2xl z-20"
+      >
         <Badge variant={running ? "default" : "outline"} className="h-5 text-[10px]">
           {running ? (playbackPaused ? "● Paused" : "● Live") : "Standing by"}
         </Badge>
@@ -890,7 +1159,7 @@ export default function GridNomadDashboard() {
         <Badge variant="outline" className="h-5 text-[10px]">{metrics.humans} humans</Badge>
         <Badge variant="outline" className={readiness.ready ? "h-5 text-[10px]" : "h-5 border-red-500/40 bg-red-500/10 text-[10px] text-red-200"}>{readiness.ready ? "ready" : "blocked"}</Badge>
         <Badge variant="outline" className="h-5 text-[10px]">{metrics.groups} groups</Badge>
-      </footer>
+      </motion.footer>
 
       {/* ── SETTINGS SHEET ── */}
       <CivilizationSettingsSheet
@@ -900,13 +1169,17 @@ export default function GridNomadDashboard() {
         onTabChange={setSheetTab}
         settings={settings}
         providerCatalogs={providerCatalogs}
+        opencodeCatalog={providerCatalogs[catalogKey("global", "opencode")] ?? null}
+        opencodeZenKeyDraft={opencodeZenKeyDraft}
+        onOpencodeZenKeyDraftChange={setOpencodeZenKeyDraft}
         busy={busy}
-        onUpdateWorld={patchWorld}
+        onPatchWorld={patchWorld}
         onAddGroup={addHumanGroup}
         onDeleteGroup={deleteHumanGroup}
         onUpdateGroup={patchGroup}
         onUpdateHuman={patchHuman}
         onUpdateGroupController={patchGroupController}
+        onSelectControllerModel={handleControllerModelSelection}
         onSaveSettings={() => saveSettings()}
         onGenerateWorld={() => generateWorld()}
         onRefreshProviderCatalog={refreshProviderCatalog}
@@ -1069,8 +1342,14 @@ function groupLabel(scenario, factionId) {
 function ThoughtStream({ human, group, isLocked, onToggleLock }) {
   if (!human) return null;
   return (
-    <div className="absolute top-4 right-4 z-30 w-80 rounded-2xl border border-white/20 bg-black/40 p-4 shadow-2xl backdrop-blur-xl backdrop-saturate-180">
-      <div className="mb-2 flex items-center justify-between">
+    <motion.div 
+      initial={{ opacity: 0, y: -20, scale: 0.95 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={{ opacity: 0, scale: 0.9 }}
+      transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+      className="absolute top-6 right-6 z-30 w-[340px] rounded-[24px] border border-white/6 bg-black/50 p-5 shadow-[0_16px_64px_rgba(0,0,0,0.8)] backdrop-blur-3xl backdrop-saturate-[1.2]"
+    >
+      <div className="mb-4 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Badge className="bg-white/10 text-white hover:bg-white/20">{human.name}</Badge>
           <span className="text-[10px] capitalize text-zinc-400">{group}</span>
@@ -1080,17 +1359,17 @@ function ThoughtStream({ human, group, isLocked, onToggleLock }) {
         </Button>
       </div>
       
-      <div className="mb-3 space-y-1">
-        <div className="text-[9px] uppercase tracking-widest text-zinc-500">Current Intent</div>
-        <div className="text-xs leading-snug text-zinc-200">{human.current_intent || human.last_intent?.reason || "Idle."}</div>
+      <div className="mb-4 space-y-1">
+        <div className="text-[10px] uppercase font-semibold tracking-widest text-zinc-500">Current Intent</div>
+        <div className="text-sm leading-snug text-zinc-200">{human.current_intent || human.last_intent?.reason || "Idle."}</div>
       </div>
 
-      <div className="space-y-1 rounded-xl bg-white/5 p-3">
-         <div className="text-[9px] uppercase tracking-widest text-amber-500/80 drop-shadow-md">AI Thought Stream</div>
-         <div className="font-serif text-sm px-1 py-1 italic leading-relaxed text-amber-100/90 [text-shadow:0_1px_5px_rgb(255_255_255/20%)]">
+      <div className="space-y-1.5 rounded-[16px] border border-white/4 bg-white/2 p-4">
+         <div className="text-[10px] uppercase font-semibold tracking-widest text-amber-500/80 drop-shadow-md">AI Thought Stream</div>
+         <div className="font-serif text-sm px-1 py-1 italic leading-relaxed text-amber-100/90 [text-shadow:0_1px_8px_rgba(255,255,255,0.1)]">
            "{human.last_thought || "Processing environment..."}"
          </div>
       </div>
-    </div>
+    </motion.div>
   );
 }

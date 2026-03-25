@@ -26,28 +26,28 @@ export default function InspectorTabs({
 }) {
   return (
     <div className={`flex flex-col overflow-hidden ${className}`}>
-      <div className="border-b border-white/20 px-3 py-2">
+      <div className="border-b border-white/6 px-4 py-3">
         <div className="flex items-center justify-between gap-2">
           <span className="text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-400">Inspector</span>
-          <Badge className="h-6 px-3">{events.length} events</Badge>
+          <Badge className="h-6 px-3 bg-white/5 text-zinc-300 hover:bg-white/10">{events.length} events</Badge>
         </div>
       </div>
       <Tabs defaultValue="inspect" className="flex min-h-0 flex-1 flex-col">
-        <div className="border-b border-white/20 px-3 py-1.5">
-          <TabsList className="grid w-full grid-cols-4 h-8">
-            <TabsTrigger value="inspect" className="text-xs h-full">
+        <div className="border-b border-white/6 px-4 py-2">
+          <TabsList className="grid w-full grid-cols-4 h-9 bg-white/5 rounded-[10px] p-1">
+            <TabsTrigger value="inspect" className="text-xs h-full rounded-[6px] data-[state=active]:bg-white/10 data-[state=active]:text-white data-[state=active]:shadow-sm">
               <Eye className="mr-1.5 size-3.5" />
               Inspect
             </TabsTrigger>
-            <TabsTrigger value="events" className="text-xs h-full">
+            <TabsTrigger value="events" className="text-xs h-full rounded-[6px] data-[state=active]:bg-white/10 data-[state=active]:text-white data-[state=active]:shadow-sm">
               <Clock3 className="mr-1.5 size-3.5" />
               Events
             </TabsTrigger>
-            <TabsTrigger value="comms" className="text-xs h-full">
+            <TabsTrigger value="comms" className="text-xs h-full rounded-[6px] data-[state=active]:bg-white/10 data-[state=active]:text-white data-[state=active]:shadow-sm">
               <MessagesSquare className="mr-1.5 size-3.5" />
               Comms
             </TabsTrigger>
-            <TabsTrigger value="history" className="text-xs h-full">
+            <TabsTrigger value="history" className="text-xs h-full rounded-[6px] data-[state=active]:bg-white/10 data-[state=active]:text-white data-[state=active]:shadow-sm">
               <History className="mr-1.5 size-3.5" />
               Runs
             </TabsTrigger>
@@ -108,7 +108,7 @@ export default function InspectorTabs({
                 ) : null}
               </div>
             ) : (
-              <div className="rounded-xl border border-white/20 bg-white/10 p-4 text-xs leading-6 text-zinc-400 backdrop-blur-[10px] backdrop-saturate-180">
+              <div className="rounded-xl border border-white/6 bg-white/5 p-4 text-xs leading-6 text-zinc-400 backdrop-blur-2xl">
                 Click a human or hover a tile to inspect.
               </div>
             )}
@@ -118,13 +118,13 @@ export default function InspectorTabs({
         <TabsContent value="events" className="m-0 min-h-0 flex-1">
           <ScrollArea className="h-full px-3 py-3">
             {events.length === 0 ? (
-              <div className="rounded-xl border border-white/20 bg-white/10 p-4 text-xs leading-6 text-zinc-400 backdrop-blur-[10px] backdrop-saturate-180">
+              <div className="rounded-xl border border-white/6 bg-white/5 p-4 text-xs leading-6 text-zinc-400 backdrop-blur-2xl">
                 Run the simulation to populate events.
               </div>
             ) : (
               <div className="space-y-2">
                 {events.slice(-30).reverse().map((event, i) => (
-                  <article key={`${event.tick}-${i}`} className="rounded-xl border border-white/20 bg-white/10 p-3 backdrop-blur-[10px] backdrop-saturate-180">
+                  <article key={`${event.tick}-${i}`} className="rounded-xl border border-white/6 bg-white/5 p-3 backdrop-blur-2xl">
                     <div className="mb-1.5 flex items-center justify-between gap-2 text-[9px] uppercase tracking-[0.18em] text-zinc-500">
                       <span>Live step {event.tick}</span>
                       <span>{event.kind}</span>
@@ -176,7 +176,7 @@ export default function InspectorTabs({
               </Button>
             </div>
             {runs.length === 0 ? (
-              <div className="rounded-xl border border-white/20 bg-white/10 p-4 text-xs leading-6 text-zinc-400 backdrop-blur-[10px] backdrop-saturate-180">
+              <div className="rounded-xl border border-white/6 bg-white/5 p-4 text-xs leading-6 text-zinc-400 backdrop-blur-2xl">
                 No saved runs yet. Stream a simulation and it will appear here.
               </div>
             ) : (
@@ -242,7 +242,7 @@ function HumanPanel({ human, group, controller, recentMemories = [] }) {
   const model = controller?.model || "Auto";
 
   return (
-    <div className="space-y-3 rounded-xl border border-white/20 bg-white/10 p-3 backdrop-blur-[10px] backdrop-saturate-180">
+    <div className="space-y-3 rounded-xl border border-white/6 bg-white/5 p-3 backdrop-blur-2xl">
       <div className="flex items-start justify-between gap-2">
         <div>
           <p className="text-[9px] uppercase tracking-[0.2em] text-zinc-500">Selected human</p>
@@ -299,8 +299,8 @@ function HumanPanel({ human, group, controller, recentMemories = [] }) {
 
 function Chip({ label, value }) {
   return (
-    <div className="rounded-xl border border-white/10 bg-white/5 p-2.5 backdrop-blur-[10px] backdrop-saturate-180">
-      <p className="mb-0.5 ml-0.5 text-[9px] uppercase tracking-[0.15em] text-zinc-400">{label}</p>
+    <div className="rounded-[14px] border border-white/4 bg-white/3 p-3 backdrop-blur-2xl transition hover:bg-white/5">
+      <p className="mb-0.5 ml-0.5 text-[9px] uppercase tracking-[0.15em] text-zinc-500">{label}</p>
       <p className="ml-0.5 text-xs font-semibold text-zinc-100">{value}</p>
     </div>
   );
@@ -308,8 +308,8 @@ function Chip({ label, value }) {
 
 function Section({ title, children }) {
   return (
-    <div className="space-y-1 rounded-lg border border-white/6 bg-white/2 p-2.5">
-      <p className="text-[8px] uppercase tracking-[0.2em] text-zinc-500">{title}</p>
+    <div className="space-y-1.5 rounded-[12px] border border-white/4 bg-white/2 p-3">
+      <p className="text-[9px] uppercase tracking-[0.2em] text-zinc-500">{title}</p>
       <p className="text-[11px] leading-5 text-zinc-300">{children}</p>
     </div>
   );
@@ -328,7 +328,7 @@ function CommsSection({ title, messages, scenario }) {
         <div className="rounded-xl border border-white/20 bg-white/2.5 p-3 text-xs text-zinc-500">No messages.</div>
       ) : (
         messages.slice(-12).reverse().map((msg, i) => (
-          <article key={`${msg.tick}-${msg.sender_agent_id}-${i}`} className="rounded-xl border border-white/20 bg-white/10 p-3 backdrop-blur-[10px] backdrop-saturate-180">
+          <article key={`${msg.tick}-${msg.sender_agent_id}-${i}`} className="rounded-xl border border-white/6 bg-white/5 p-3 backdrop-blur-2xl">
             <div className="mb-1.5 flex items-center justify-between gap-2 text-[9px] uppercase tracking-[0.18em] text-zinc-500">
               <span>Live step {msg.tick}</span>
               <span>{msg.scope}</span>

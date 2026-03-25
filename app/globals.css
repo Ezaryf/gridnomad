@@ -41,10 +41,10 @@
   --muted-foreground: #a1a1aa;
   --accent: rgba(255, 255, 255, 0.08);
   --accent-foreground: #fafafa;
-  --border: rgba(255, 255, 255, 0.1);
-  --input: rgba(255, 255, 255, 0.08);
-  --ring: rgba(255, 255, 255, 0.22);
-  --radius: 1.25rem;
+  --border: rgba(255, 255, 255, 0.06);
+  --input: rgba(255, 255, 255, 0.06);
+  --ring: rgba(255, 255, 255, 0.15);
+  --radius: 1.5rem;
 }
 
 @layer base {
@@ -58,10 +58,7 @@
 
   body {
     @apply min-h-screen bg-background font-sans text-foreground antialiased;
-    background-image:
-      radial-gradient(circle at top, rgba(255, 255, 255, 0.08), transparent 18%),
-      radial-gradient(circle at 80% 14%, rgba(255, 255, 255, 0.05), transparent 18%),
-      linear-gradient(180deg, #000000 0%, #020202 52%, #000000 100%);
+    background: #000000;
   }
 
   button,
@@ -92,9 +89,8 @@
   position: absolute;
   inset: 1px;
   border-radius: 2rem;
-  background:
-    radial-gradient(circle at top left, rgba(255, 255, 255, 0.08), transparent 24%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.025), rgba(255, 255, 255, 0.01));
+  background: radial-gradient(circle at top left, rgba(255, 255, 255, 0.05), transparent 40%),
+              linear-gradient(180deg, rgba(255, 255, 255, 0.015), rgba(255, 255, 255, 0.005));
   opacity: 0.95;
   z-index: -1;
 }
