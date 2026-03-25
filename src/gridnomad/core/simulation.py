@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from gridnomad.ai.adapters import AgentContext, LLMAdapter, build_agent_context, parse_decision_payload
+from gridnomad.ai.cognition import CognitionAdapter
 from gridnomad.ai.civilizations import ProviderDecisionError
 from gridnomad.ai.personality_weights import get_action_modifier
 from gridnomad.core.actions import ActionRegistry, MODEL_ACTIONS, MOVE_DELTAS
@@ -100,6 +101,7 @@ class Simulation:
         self.config = config
         self.world = world
         self.adapter = adapter
+        self.cognition = CognitionAdapter(adapter=adapter)
         self.registry = ActionRegistry(perception_radius=config.perception_radius)
         self.culture_store = culture_store or CultureStore(
         )
@@ -172,7 +174,8 @@ class Simulation:
             self._update_agent_step_memory(agent, decision, action, action_events)
 
             if decision.thought.strip():
-                self.memory_store.add_thought(agent.id, decision.thought)
+                node = self.memory_store.add_memory(agent.id, "thought", decision.thought.strip(), self.world.tick)
+                if node: agent.accumulated_importance += node.importance
 
             if decision.cultural_innovation is not None:
                 self.culture_store.add_innovation(
@@ -257,8 +260,13 @@ class Simulation:
 
     def _build_decision_input(self, agent: AgentState) -> tuple[AgentState, object, AgentContext]:
         perception = build_perception(self.world, agent, self.config.perception_radius)
-        recent_events = self.memory_store.recent_events(agent.id, limit=5)
-        memories = self.memory_store.recent_thoughts(agent.id, limit=5)
+        
+        # Contextual retrieval based on current situation and plans
+        query_str = f"{perception.signature} {agent.current_intent} {agent.daily_plan}"
+        retrieved_nodes = self.memory_store.retrieve(agent.id, query_str, self.world.tick, limit=8)
+        recent_events = [n.content for n in retrieved_nodes if n.type == "event"]
+        memories = [n.content for n in retrieved_nodes if n.type != "event"]
+        
         recent_messages = self._recent_messages_for_agent(agent)
         group_context = self._group_context_for_agent(agent)
         context = build_agent_context(
@@ -312,6 +320,32 @@ class Simulation:
 
     def _resolve_decision_input(self, item: tuple[AgentState, object, AgentContext]) -> AgentDecisionFrame:
         agent, perception, context = item
+        
+        # Stanford Memory Stream: Planning Layer
+        time_of_day_interval = max(1, round(15000 / self.config.microstep_interval_ms))
+        if self.world.tick % time_of_day_interval == 0 or not agent.daily_plan:
+            if self.world.tick - agent.last_planned_tick >= time_of_day_interval * 24 or not agent.daily_plan:
+                try:
+                    plan = self.cognition.generate_daily_plan(agent, self.memory_store, self.world, self.world.tick)
+                    if plan:
+                        agent.daily_plan = plan
+                        node = self.memory_store.add_memory(agent.id, "plan", f"Plan for the day: {plan}", self.world.tick)
+                        if node: agent.accumulated_importance += node.importance
+                        agent.last_planned_tick = self.world.tick
+                except Exception:
+                    pass
+
+        # Stanford Memory Stream: Reflection Layer
+        if agent.accumulated_importance >= agent.reflection_threshold:
+            try:
+                insights = self.cognition.generate_reflection(agent, self.memory_store, self.world, self.world.tick)
+                for insight in insights:
+                    node = self.memory_store.add_memory(agent.id, "reflection", insight, self.world.tick)
+                agent.accumulated_importance = 0
+                agent.reflection_threshold = min(150, agent.reflection_threshold + 5)
+            except Exception:
+                pass
+
         try:
             raw = self.adapter.decide(context)
         except ProviderDecisionError as exc:
@@ -1052,14 +1086,16 @@ class Simulation:
 
     def _record_event(self, event: SimulationEvent) -> None:
         if event.actor_id is not None:
-            self.memory_store.add_event(event.actor_id, event.description)
+            node = self.memory_store.add_memory(event.actor_id, "event", event.description, self.world.tick)
             actor = self.world.agents.get(event.actor_id)
             if actor is not None:
+                if node: actor.accumulated_importance += node.importance
                 self.culture_store.observe_outcome(actor.faction_id, event.description, event.success)
         if event.target_agent_id is not None:
-            self.memory_store.add_event(event.target_agent_id, event.description)
+            node = self.memory_store.add_memory(event.target_agent_id, "event", event.description, self.world.tick)
             target = self.world.agents.get(event.target_agent_id)
             if target is not None:
+                if node: target.accumulated_importance += node.importance
                 self.culture_store.observe_outcome(target.faction_id, event.description, event.success)
         if event.kind == "COMMUNICATION":
             target_faction_id = event.metadata.get("target_faction_id") if isinstance(event.metadata, dict) else None
@@ -1067,7 +1103,8 @@ class Simulation:
                 if not agent.alive:
                     continue
                 if agent.faction_id == event.faction_id or agent.faction_id == target_faction_id:
-                    self.memory_store.add_event(agent.id, event.description)
+                    node = self.memory_store.add_memory(agent.id, "event", event.description, self.world.tick)
+                    if node: agent.accumulated_importance += node.importance
 
     def _update_agent_step_memory(
         self,

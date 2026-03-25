@@ -9,7 +9,8 @@ import {
 import {
   ensureProjectData,
   inspectGemini,
-  inspectOpencode
+  inspectOpencode,
+  inspectOpencodeZen
 } from "@/lib/gridnomad-store";
 
 
@@ -69,7 +70,9 @@ export async function GET(request) {
     const credential = url.searchParams.get("credential") ?? "";
     const cliHome = url.searchParams.get("cliHome") ?? "";
     const model = url.searchParams.get("model") ?? "";
-    const inspection = await inspectOpencode({ credential, cliHome, model });
+    const inspection = credential || cliHome
+      ? await inspectOpencode({ credential, cliHome, model })
+      : await inspectOpencodeZen({ model });
     return NextResponse.json({
       ...inspection,
       supports_model_listing: true,

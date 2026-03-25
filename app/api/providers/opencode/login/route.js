@@ -11,7 +11,7 @@ export async function POST(request) {
   const inspection = await inspectOpencode({ cliHome, credential });
   return NextResponse.json({
     ok: false,
-    message: "GridNomad now uses a manual OpenCode login flow. Copy the login command and run it in your own terminal, then refresh credentials and models.",
+    message: "GridNomad now uses the shared OpenCode Zen connection flow. Paste a Zen API key in the OpenCode card, connect it once, then refresh model verification.",
     ...inspection,
   }, { status: 409 });
 }

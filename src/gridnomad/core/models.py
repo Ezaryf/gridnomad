@@ -553,6 +553,10 @@ class AgentState:
     interaction_target_id: str | None = None
     speaking_until_ms: int = 0
     last_decision_at_ms: int = 0
+    daily_plan: str = ""
+    reflection_threshold: int = 50
+    accumulated_importance: int = 0
+    last_planned_tick: int = -999
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "AgentState":
@@ -624,6 +628,10 @@ class AgentState:
             interaction_target_id=data.get("interaction_target_id"),
             speaking_until_ms=require_int("speaking_until_ms", data.get("speaking_until_ms", 0), 0),
             last_decision_at_ms=require_int("last_decision_at_ms", data.get("last_decision_at_ms", 0), 0),
+            daily_plan=str(data.get("daily_plan", "")),
+            reflection_threshold=require_int("reflection_threshold", data.get("reflection_threshold", 50), 0),
+            accumulated_importance=require_int("accumulated_importance", data.get("accumulated_importance", 0), 0),
+            last_planned_tick=require_int("last_planned_tick", data.get("last_planned_tick", -999)),
         )
 
     @property
@@ -687,6 +695,10 @@ class AgentState:
             "interaction_target_id": self.interaction_target_id,
             "speaking_until_ms": self.speaking_until_ms,
             "last_decision_at_ms": self.last_decision_at_ms,
+            "daily_plan": self.daily_plan,
+            "reflection_threshold": self.reflection_threshold,
+            "accumulated_importance": self.accumulated_importance,
+            "last_planned_tick": self.last_planned_tick,
         }
 
 

@@ -137,6 +137,7 @@ class AgentPromptView:
     x: int
     y: int
     last_goal: str | None
+    daily_plan: str
 
     @classmethod
     def from_agent(cls, agent: AgentState, memories: list[str]) -> "AgentPromptView":
@@ -165,6 +166,7 @@ class AgentPromptView:
             x=agent.x,
             y=agent.y,
             last_goal=agent.last_goal,
+            daily_plan=agent.daily_plan,
         )
 
 
@@ -206,10 +208,13 @@ You belong to the group {agent.group}. The AI controlling your group should beha
 ## Your Personality-Driven Behavior:
 {get_personality_guidance(agent)}
 
+## Your Daily Plan & Active Goals:
+{agent.daily_plan if agent.daily_plan else "No specific plan for today. Survive and help the group."}
+
 ## Your Current State:
 - Emotions (0-10): Joy={agent.emotions.joy}, Sadness={agent.emotions.sadness}, Fear={agent.emotions.fear}, Anger={agent.emotions.anger}, Disgust={agent.emotions.disgust}, Surprise={agent.emotions.surprise}
 - Needs (0-10): Survival={agent.needs.survival}, Safety={agent.needs.safety}, Belonging={agent.needs.belonging}, Esteem={agent.needs.esteem}, Self_Actualization={agent.needs.self_actualization}
-- Recent memories: {agent.memory.recent_thoughts()}
+- Relevant memories & reflections: {agent.memory.memories}
 - Current location: ({agent.x}, {agent.y})
 
 ## What You See & Know Right Now:

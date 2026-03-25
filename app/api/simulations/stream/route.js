@@ -9,7 +9,7 @@ import {
   ROOT,
   ensureProjectData,
   inspectGemini,
-  inspectOpencode,
+  inspectOpencodeZen,
   readScenario,
   readSettings,
   worldArgsFromSettings
@@ -130,6 +130,7 @@ function quoteWindowsArgument(value) {
 
 async function validateStrictSimulationSetup(settings) {
   const groups = settings.groups ?? [];
+  const opencodeProbeCache = new Map();
   const nameValidation = humanNameValidation(settings);
   if (!nameValidation.valid) {
     return {
@@ -158,21 +159,20 @@ async function validateStrictSimulationSetup(settings) {
       continue;
     }
     if (provider === "opencode") {
-      const inspection = await inspectOpencode({
-        credential: controller.opencodeProvider ?? "",
-        cliHome: controller.cliHome ?? "",
-        isolated: Boolean(controller.cliHome),
-        model,
-      });
+      const cacheKey = model || "__none__";
+      const inspection = opencodeProbeCache.has(cacheKey)
+        ? opencodeProbeCache.get(cacheKey)
+        : await inspectOpencodeZen({ model });
+      opencodeProbeCache.set(cacheKey, inspection);
       if (inspection.health_state !== "ready") {
         return {
           ok: false,
           reason: inspection.health_state,
-          message: `${group.name} is not ready for OpenCode: ${inspection.login_hint}`,
+          message: `${group.name} is not ready for OpenCode Zen: ${inspection.login_hint}`,
           group_id: group.id,
           provider,
           health_state: inspection.health_state,
-          detected_cli_home: inspection.detected_cli_home,
+          detected_cli_home: inspection.detected_cli_home ?? inspection.cli_home,
         };
       }
       if (!model) {

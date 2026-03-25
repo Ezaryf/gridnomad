@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { ensureProjectData, inspectOpencode } from "@/lib/gridnomad-store";
+import { ensureProjectData, inspectOpencode, inspectOpencodeZen } from "@/lib/gridnomad-store";
 
 
 export async function GET(request) {
@@ -8,5 +8,8 @@ export async function GET(request) {
   const url = new URL(request.url);
   const credential = url.searchParams.get("credential") ?? "";
   const cliHome = url.searchParams.get("cliHome") ?? "";
+  if (!credential && !cliHome) {
+    return NextResponse.json(await inspectOpencodeZen());
+  }
   return NextResponse.json(await inspectOpencode({ credential, cliHome }));
 }

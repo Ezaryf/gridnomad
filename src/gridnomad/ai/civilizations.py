@@ -456,8 +456,7 @@ class OpenCodeCLIAdapter:
             self._command_prefix, self._resolved_command = _resolve_cli_command("opencode")
         command = list(self._command_prefix)
         command.extend(["run", "--dir", str(self.project_dir), "--format", "json", "--title", "GridNomad simulation"])
-        if self.config.opencode_provider:
-            command.extend(["--provider", self.config.opencode_provider])
+
         if self.config.model:
             command.extend(["-m", self.config.model])
         return command
@@ -470,7 +469,11 @@ class OpenCodeCLIAdapter:
             cwd=self.project_dir,
             env=build_cli_environment(
                 self.config.cli_home,
-                {"OPENCODE_PROVIDER": self.config.opencode_provider or ""},
+                {
+                    "OPENCODE_PROVIDER": self.config.opencode_provider or "",
+                    "OPENCODE_CLIENT": "gridnomad",
+                    "OPENCODE_PERMISSION": json.dumps({"*": "deny"}),
+                },
             ),
             capture_output=True,
             text=True,

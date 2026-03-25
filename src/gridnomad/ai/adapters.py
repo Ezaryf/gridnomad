@@ -333,6 +333,11 @@ class ScriptedLLMAdapter:
         self.responses = responses
         self._index = 0
 
+    def provide_raw(self, prompt: str) -> str:
+        if "insights" in prompt:
+            return '{"insights": ["dummy insight from script"]}'
+        return "Scripted dummy plan."
+
     def decide(self, agent_context: AgentContext) -> DecisionPayload | str:
         if isinstance(self.responses, dict):
             queue = self.responses.get(agent_context.agent.id, [])
