@@ -18,6 +18,7 @@ ANSI_PATTERN = re.compile(r"\x1b\[[0-9;]*m")
 DEFAULT_OPENAI_MODEL = "gpt-5-mini"
 DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-5"
 DEFAULT_GEMINI_API_MODEL = "gemini-2.5-flash"
+DEFAULT_GROQ_MODEL = "llama-3.3-70b-versatile"
 
 
 class ProviderDecisionError(RuntimeError):
@@ -229,11 +230,11 @@ class CivilizationProviderConfig:
             cli_home=data.get("cliHome") or data.get("cli_home"),
             managed_home_id=data.get("managedHomeId") or data.get("managed_home_id"),
             execution_mode=str(data.get("executionMode", data.get("execution_mode", "per_human"))),
-            timeout_seconds=int(data.get("timeoutSeconds", data.get("timeout_seconds", 120))),
+            timeout_seconds=int(data.get("timeoutSeconds") or data.get("timeout_seconds") or 120),
             base_url=data.get("baseUrl") or data.get("base_url"),
-            available_models=[str(item) for item in data.get("availableModels", data.get("available_models", []))],
-            supports_model_listing=bool(data.get("supportsModelListing", data.get("supports_model_listing", False))),
-            supports_manual_model_entry=bool(data.get("supportsManualModelEntry", data.get("supports_manual_model_entry", False))),
+            available_models=[str(item) for item in (data.get("availableModels") or data.get("available_models") or [])],
+            supports_model_listing=bool(data.get("supportsModelListing") or data.get("supports_model_listing") or False),
+            supports_manual_model_entry=bool(data.get("supportsManualModelEntry") or data.get("supports_manual_model_entry") or False),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -399,6 +400,35 @@ class GeminiAPIAdapter:
         return _clean_cli_output(output)
 
 
+class GroqAPIAdapter:
+    def __init__(self, config: CivilizationProviderConfig) -> None:
+        self.config = config
+
+    def decide(self, agent_context: AgentContext) -> str:
+        api_key = self.config.api_key or os.environ.get("GROQ_API_KEY")
+        if not api_key:
+            raise RuntimeError("Groq API key is missing.")
+        try:
+            from groq import Groq
+        except ImportError as exc:
+            raise RuntimeError("Groq SDK is not installed.") from exc
+
+        client = Groq(
+            api_key=api_key,
+            base_url=self.config.base_url or None,
+            timeout=self.config.timeout_seconds,
+        )
+        response = client.chat.completions.create(
+            model=self.config.model or DEFAULT_GROQ_MODEL,
+            messages=[{"role": "user", "content": agent_context.prompt}],
+        )
+        choice = getattr(response, "choices", [])
+        output = getattr(choice[0].message, "content", "") if choice else ""
+        if not output:
+            raise RuntimeError("Groq API returned no output.")
+        return _clean_cli_output(output)
+
+
 class GeminiCLIAdapter:
     def __init__(self, config: CivilizationProviderConfig, *, project_dir: Path | None = None) -> None:
         self.config = config
@@ -409,15 +439,15 @@ class GeminiCLIAdapter:
     def _command_base(self) -> list[str]:
         if self._command_prefix is None or self._resolved_command is None:
             self._command_prefix, self._resolved_command = _resolve_cli_command("gemini")
-        command = list(self._command_prefix)
-        command.extend(["-p"])
+        command = list(self._command_prefix or [])
+        command.append("-p")
         return command
 
     def decide(self, agent_context: AgentContext) -> str:
         command = self._command_base()
         command.append(agent_context.prompt)
         if self.config.model:
-            command.extend(["-m", self.config.model])
+            command.extend(["-m", str(self.config.model)])
         env_extra = {
             "GEMINI_API_KEY": self.config.api_key or os.environ.get("GEMINI_API_KEY") or "",
             "GOOGLE_API_KEY": self.config.google_api_key or os.environ.get("GOOGLE_API_KEY") or "",
@@ -454,11 +484,11 @@ class OpenCodeCLIAdapter:
     def _command_base(self) -> list[str]:
         if self._command_prefix is None or self._resolved_command is None:
             self._command_prefix, self._resolved_command = _resolve_cli_command("opencode")
-        command = list(self._command_prefix)
+        command = list(self._command_prefix or [])
         command.extend(["run", "--dir", str(self.project_dir), "--format", "json", "--title", "GridNomad simulation"])
 
         if self.config.model:
-            command.extend(["-m", self.config.model])
+            command.extend(["-m", str(self.config.model)])
         return command
 
     def _run_prompt(self, prompt: str) -> str:
@@ -575,6 +605,56 @@ class RoutingLLMAdapter:
                 message=str(exc),
             ) from exc
 
+    def _handle_group_batch(self, faction_id: str, config: CivilizationProviderConfig, contexts: list[AgentContext]) -> dict[str, object]:
+        adapter = self._adapter_for(config)
+        try:
+            decisions_method = getattr(adapter, "decide_many")
+            decisions = decisions_method(contexts)
+        except Exception as exc:
+            with self._lock:
+                self._runtime_messages.append(
+                    {
+                        "faction_id": faction_id,
+                        "provider": config.provider,
+                        "model": config.model or "",
+                        "message": str(exc),
+                    }
+                )
+            raise ProviderDecisionError(
+                faction_id=faction_id,
+                provider=config.provider,
+                model=config.model or "",
+                message=str(exc),
+            ) from exc
+        
+        expected_ids = {context.agent.id for context in contexts}
+        returned_ids = set(decisions.keys())
+        if returned_ids != expected_ids:
+            missing = sorted(expected_ids - returned_ids)
+            extras = sorted(returned_ids - expected_ids)
+            detail_bits: list[str] = []
+            if missing:
+                detail_bits.append(f"missing {', '.join(missing)}")
+            if extras:
+                detail_bits.append(f"unexpected {', '.join(extras)}")
+            detail = f"Batch OpenCode response did not cover the group exactly ({'; '.join(detail_bits)})."
+            with self._lock:
+                self._runtime_messages.append(
+                    {
+                        "faction_id": faction_id,
+                        "provider": config.provider,
+                        "model": config.model or "",
+                        "message": detail,
+                    }
+                )
+            raise ProviderDecisionError(
+                faction_id=faction_id,
+                provider=config.provider,
+                model=config.model or "",
+                message=detail,
+            )
+        return decisions
+
     def decide_many(self, agent_contexts: list[AgentContext]) -> dict[str, object]:
         outputs: dict[str, object] = {}
         grouped: dict[str, list[AgentContext]] = {}
@@ -584,51 +664,7 @@ class RoutingLLMAdapter:
         for faction_id, contexts in grouped.items():
             config = self.settings.for_faction(faction_id)
             if config.provider == "opencode" and config.execution_mode == "group_batch":
-                adapter = self._adapter_for(config)
-                try:
-                    decisions = adapter.decide_many(contexts)
-                except Exception as exc:
-                    with self._lock:
-                        self._runtime_messages.append(
-                            {
-                                "faction_id": faction_id,
-                                "provider": config.provider,
-                                "model": config.model or "",
-                                "message": str(exc),
-                            }
-                        )
-                    raise ProviderDecisionError(
-                        faction_id=faction_id,
-                        provider=config.provider,
-                        model=config.model or "",
-                        message=str(exc),
-                    ) from exc
-                expected_ids = {context.agent.id for context in contexts}
-                returned_ids = set(decisions.keys())
-                if returned_ids != expected_ids:
-                    missing = sorted(expected_ids - returned_ids)
-                    extras = sorted(returned_ids - expected_ids)
-                    detail_bits: list[str] = []
-                    if missing:
-                        detail_bits.append(f"missing {', '.join(missing)}")
-                    if extras:
-                        detail_bits.append(f"unexpected {', '.join(extras)}")
-                    detail = f"Batch OpenCode response did not cover the group exactly ({'; '.join(detail_bits)})."
-                    with self._lock:
-                        self._runtime_messages.append(
-                            {
-                                "faction_id": faction_id,
-                                "provider": config.provider,
-                                "model": config.model or "",
-                                "message": detail,
-                            }
-                        )
-                    raise ProviderDecisionError(
-                        faction_id=faction_id,
-                        provider=config.provider,
-                        model=config.model or "",
-                        message=detail,
-                    )
+                decisions = self._handle_group_batch(faction_id, config, contexts)
                 outputs.update(decisions)
                 continue
 
@@ -655,16 +691,17 @@ class RoutingLLMAdapter:
         with self._lock:
             if cache_key in self._cache:
                 return self._cache[cache_key]
-            if config.provider == "gemini-cli":
-                adapter = GeminiCLIAdapter(config, project_dir=self.project_dir)
-            elif config.provider == "gemini-api":
-                adapter = GeminiAPIAdapter(config)
-            elif config.provider == "openai":
-                adapter = OpenAIAPIAdapter(config)
-            elif config.provider == "anthropic":
-                adapter = AnthropicAPIAdapter(config)
-            elif config.provider == "opencode":
-                adapter = OpenCodeCLIAdapter(config, project_dir=self.project_dir)
+            
+            adapter_factory = {
+                "gemini-cli": lambda: GeminiCLIAdapter(config, project_dir=self.project_dir),
+                "opencode": lambda: OpenCodeCLIAdapter(config, project_dir=self.project_dir),
+                "gemini-api": lambda: GeminiAPIAdapter(config),
+                "openai": lambda: OpenAIAPIAdapter(config),
+                "anthropic": lambda: AnthropicAPIAdapter(config),
+                "groq": lambda: GroqAPIAdapter(config),
+            }
+            if config.provider in adapter_factory:
+                adapter = adapter_factory[config.provider]()
             else:
                 adapter = self.heuristic
             self._cache[cache_key] = adapter

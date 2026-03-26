@@ -25,8 +25,8 @@
       "population_count": 4,
       "culture_summary": "A small human group trying to survive, cooperate, and find meaning together.",
       "controller": {
-        "provider": "opencode",
-        "model": "opencode/minimax-m2.5-free",
+        "provider": "groq",
+        "model": "llama-3.1-8b-instant",
         "apiKey": "",
         "googleApiKey": "",
         "authMode": "existing-cli-auth",
@@ -39,12 +39,12 @@
         "timeoutSeconds": 120,
         "baseUrl": "",
         "availableModels": [
-          "opencode/big-pickle",
-          "opencode/gpt-5-nano",
-          "opencode/mimo-v2-omni-free",
-          "opencode/mimo-v2-pro-free",
-          "opencode/minimax-m2.5-free",
-          "opencode/nemotron-3-super-free"
+          "llama-3.3-70b-versatile",
+          "llama-3.1-8b-instant",
+          "llama-3.2-90b-vision-preview",
+          "mixtral-8x7b-32768",
+          "gemma-2-9b-it",
+          "qwen-2.5-32b"
         ],
         "supportsModelListing": true,
         "supportsManualModelEntry": true
@@ -199,8 +199,8 @@
       "population_count": 4,
       "culture_summary": "A small human group trying to survive, cooperate, and find meaning together.",
       "controller": {
-        "provider": "opencode",
-        "model": "opencode",
+        "provider": "groq",
+        "model": "llama-3.1-8b-instant",
         "apiKey": "",
         "googleApiKey": "",
         "authMode": "existing-cli-auth",
@@ -213,12 +213,12 @@
         "timeoutSeconds": 120,
         "baseUrl": "",
         "availableModels": [
-          "opencode/big-pickle",
-          "opencode/gpt-5-nano",
-          "opencode/mimo-v2-omni-free",
-          "opencode/mimo-v2-pro-free",
-          "opencode/minimax-m2.5-free",
-          "opencode/nemotron-3-super-free"
+          "llama-3.3-70b-versatile",
+          "llama-3.1-8b-instant",
+          "llama-3.2-90b-vision-preview",
+          "mixtral-8x7b-32768",
+          "gemma-2-9b-it",
+          "qwen-2.5-32b"
         ],
         "supportsModelListing": true,
         "supportsManualModelEntry": true
@@ -373,6 +373,28 @@
     "cli_home": "C:\\Users\\ezary\\AppData\\Local\\GridNomad\\cli-runtime\\opencode-zen-default",
     "health_state": "login_required",
     "connected_provider": "opencode",
-    "last_verified_at": "2026-03-25T10:08:02.782Z"
+    "last_verified_at": "2026-03-26T16:33:51.495Z"
+  },
+  "providers": {
+    "openai": {
+      "apiKey": "",
+      "baseUrl": ""
+    },
+    "anthropic": {
+      "apiKey": "",
+      "baseUrl": ""
+    },
+    "gemini-api": {
+      "apiKey": "",
+      "baseUrl": ""
+    },
+    "gemini-cli": {
+      "apiKey": "",
+      "baseUrl": ""
+    },
+    "groq": {
+      "apiKey": "",
+      "baseUrl": ""
+    }
   }
 }

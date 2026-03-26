@@ -4,6 +4,7 @@ import {
   ANTHROPIC_MODELS,
   GEMINI_API_MODELS,
   GEMINI_MODELS,
+  GROQ_MODELS,
   OPENAI_MODELS
 } from "@/lib/civilization-setup";
 import {
@@ -63,6 +64,18 @@ export async function GET(request) {
       supports_manual_model_entry: true,
       auth_status: "api-key-required",
       login_hint: "Enter an Anthropic API key to let this provider control the group."
+    });
+  }
+
+  if (provider === "groq") {
+    return NextResponse.json({
+      ok: true,
+      provider,
+      models: GROQ_MODELS,
+      supports_model_listing: true,
+      supports_manual_model_entry: true,
+      auth_status: "api-key-required",
+      login_hint: "Enter a Groq API key to let this provider control the group."
     });
   }
 

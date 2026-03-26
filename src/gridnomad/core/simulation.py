@@ -375,7 +375,7 @@ class Simulation:
         return AgentDecisionFrame(agent=agent, perception=perception, decision=decision)
 
     def _validate_decision(self, agent: AgentState, decision: DecisionPayload) -> None:
-        if decision.action not in MODEL_ACTIONS:
+        if decision.action not in MODEL_ACTIONS and decision.action_proposal is None:
             raise SimulationAbortError(
                 message=f"{agent.name} proposed unsupported action {decision.action!r}.",
                 actor_id=agent.id,
