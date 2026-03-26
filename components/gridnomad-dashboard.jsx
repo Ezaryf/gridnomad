@@ -727,13 +727,14 @@ export default function GridNomadDashboard() {
     }
   }
 
-  async function connectOpencodeZen(model = "") {
-    const apiKey = opencodeZenKeyDraft.trim();
+  async function connectOpencodeZen(apiKeyOrModel = "") {
+    const apiKey = typeof apiKeyOrModel === 'string' ? apiKeyOrModel : opencodeZenKeyDraft.trim();
     if (!apiKey) {
       pushStatus("error", "Paste an OpenCode Zen API key first.");
       setStatusMessage("Paste an OpenCode Zen API key first.");
       return;
     }
+    const model = typeof apiKeyOrModel === 'string' ? "" : apiKeyOrModel;
     setWorking(true);
     try {
       const response = await fetch("/api/providers/opencode/connect", {
@@ -1179,14 +1180,18 @@ export default function GridNomadDashboard() {
         onUpdateGroup={patchGroup}
         onUpdateHuman={patchHuman}
         onUpdateGroupController={patchGroupController}
+        onUpdateProviderConnection={updateProviderConnection}
+        onConnectOpencode={connectOpencodeZen}
         onSelectControllerModel={handleControllerModelSelection}
         onSaveSettings={() => saveSettings()}
         onGenerateWorld={() => generateWorld()}
         onRefreshProviderCatalog={refreshProviderCatalog}
+        onRefreshCatalogs={refreshOpencodeZenConnection}
         onProviderChange={handleProviderChange}
         onProviderCredentialChange={handleProviderCredentialChange}
         onProviderModelChange={handleProviderModelChange}
         onLaunchProviderLogin={launchProviderLogin}
+        onDisconnectOpencodeZen={disconnectOpencodeZen}
         onCreateOpencodeHome={createManagedOpencodeHome}
         onCopyCommand={copyCommand}
         nameValidation={nameValidation}

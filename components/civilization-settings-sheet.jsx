@@ -2,20 +2,24 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-import { Cable, CheckCircle2, Info, KeyRound, Plus, Search, Settings2, Shield, Sparkles, Terminal, UserRoundCog, Zap } from "lucide-react";
+import { AlertTriangle, Check, CheckCircle2, Cpu, ExternalLink, Info, KeyRound, Play, Plus, RotateCcw, Search, Settings, Shield, Sparkles, Terminal, UserRoundCog, Users, Zap } from "lucide-react";
 
 
 import {
   ANTHROPIC_MODELS,
   controllerReadiness,
+  DIRECT_API_PROVIDERS,
   GEMINI_API_MODELS,
   GEMINI_MODELS,
+  GROQ_MODELS,
   OPENAI_MODELS,
   OPENCODE_ZEN_MODELS,
   PROVIDER_OPTIONS,
+  STRICT_MAX_TOTAL_POPULATION,
   providerDisplayName,
   providerSupportsBaseUrl,
-  providerUsesApiKey
+  providerUsesApiKey,
+  totalConfiguredPopulation
 } from "@/lib/civilization-setup";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -48,6 +52,7 @@ export default function CivilizationSettingsSheet({
   onPatchGroup,
   onPatchGroupController,
   onUpdateProviderConnection,
+  onConnectOpencode,
   onPatchProviders,
   onPatchOpencodeConnection,
   onPatchWorld,
@@ -67,60 +72,53 @@ export default function CivilizationSettingsSheet({
   onGenerateWorld,
   onRefreshProviderCatalog,
   onCopyCommand,
+  onDisconnectOpencodeZen,
   nameValidation,
   onRegenerateDuplicateNames
 }) {
   const groups = settings.groups ?? [];
+  const population = totalConfiguredPopulation(settings);
+  const populationOver = population > STRICT_MAX_TOTAL_POPULATION;
+  const populationWarn = population >= STRICT_MAX_TOTAL_POPULATION - 1 && !populationOver;
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="left" className="w-full p-0 sm:max-w-[880px] bg-[#030303]/90 backdrop-blur-3xl border-r border-white/6">
-        <SheetHeader className="border-b border-white/6 px-6 py-5">
+      <SheetContent side="left" className="w-full h-full flex flex-col p-0 sm:max-w-[880px] bg-black/60 backdrop-blur-3xl saturate-150 border-r border-white/10 shadow-[0_0_80px_rgba(0,0,0,0.8)]">
+        <SheetHeader className="border-b border-white/10 px-6 py-5 bg-white/2">
           <SheetTitle>Simulation setup</SheetTitle>
           <SheetDescription>
-            Tune the world and manage the human groups that the AI controllers will power.
+            Configure world settings, groups, and controllers in one place.
           </SheetDescription>
         </SheetHeader>
 
-        <Tabs value={activeTab} onValueChange={onTabChange} className="flex min-h-0 flex-1 flex-col">
-          <div className="border-b border-white/6 px-6 py-4">
-            <TabsList className="grid w-full grid-cols-3 h-10 bg-white/5 rounded-[12px] p-1">
-              <TabsTrigger value="world" className="rounded-[8px] data-[state=active]:bg-white/10 data-[state=active]:text-white data-[state=active]:shadow-sm">
-                <Settings2 className="mr-2 size-4" />
-                World
-              </TabsTrigger>
-              <TabsTrigger value="connection" className="relative rounded-[8px] data-[state=active]:bg-white/10 data-[state=active]:text-white data-[state=active]:shadow-sm">
-                <Cable className="mr-2 size-4" />
-                Connection
-                {opencodeCatalog?.health_state === "ready" ? (
-                  <span className="absolute -right-0.5 -top-0.5 size-2 rounded-full bg-emerald-400" />
-                ) : opencodeCatalog?.health_state && opencodeCatalog?.health_state !== "not_connected" ? (
-                  <span className="absolute -right-0.5 -top-0.5 size-2 rounded-full bg-amber-400" />
-                ) : null}
-              </TabsTrigger>
-              <TabsTrigger value="groups" className="rounded-[8px] data-[state=active]:bg-white/10 data-[state=active]:text-white data-[state=active]:shadow-sm">
-                <UserRoundCog className="mr-2 size-4" />
+        <Tabs value={activeTab} onValueChange={onTabChange} className="flex min-h-0 flex-1 flex-col outline-none">
+          <div className="border-b border-white/10 px-6 py-3 bg-white/1">
+            <TabsList className="grid w-full grid-cols-2 h-9 bg-black/40 backdrop-blur-md border border-white/5 shadow-inner rounded-lg p-0.5">
+              <TabsTrigger value="groups" className="rounded-md text-sm data-[state=active]:bg-white/10 data-[state=active]:text-white">
+                <Users className="size-4 mr-2" />
                 Groups
+              </TabsTrigger>
+              <TabsTrigger value="review" className="rounded-md text-sm data-[state=active]:bg-white/10 data-[state=active]:text-white">
+                <Play className="size-4 mr-2" />
+                Review
               </TabsTrigger>
             </TabsList>
           </div>
 
-          <ScrollArea className="min-h-0 flex-1">
-            <TabsContent value="world" className="m-0 px-6 py-5">
-              <Card className="border-white/6 bg-white/3 backdrop-blur-2xl shadow-[0_12px_40px_rgba(0,0,0,0.5)] rounded-[20px]">
-                <CardHeader>
-                  <CardTitle>World generator</CardTitle>
-                  <CardDescription>
-                    Keep the world procedural, but reduce the controls to the ones that actually shape the human sandbox.
-                  </CardDescription>
+          <ScrollArea className="min-h-0 flex-1" type="scroll">
+            <TabsContent value="groups" className="m-0 h-full focus-visible:outline-none px-6 py-5">
+              {/* ── WORLD SETTINGS (inline at top) ── */}
+              <Card className="border-white/10 bg-linear-to-br from-white/5 to-transparent backdrop-blur-2xl rounded-2xl shadow-[0_8px_32px_rgba(0,0,0,0.2)] mb-6">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base">World Settings</CardTitle>
                 </CardHeader>
-                <CardContent className="grid gap-4 sm:grid-cols-2">
+                <CardContent className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                   <LabeledField label="Seed">
-                    <Input type="number" value={settings.world?.seed ?? ""} onChange={(event) => onUpdateWorld({ seed: Number(event.target.value) })} />
+                    <Input type="number" value={settings.world?.seed ?? ""} onChange={(event) => onUpdateWorld({ seed: Number(event.target.value) })} className="h-8" />
                   </LabeledField>
                   <LabeledField label="Preset">
                     <Select value={settings.world?.generatorPreset ?? "grand-continent"} onValueChange={(value) => onUpdateWorld({ generatorPreset: value })}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="grand-continent">Grand Continent</SelectItem>
                         <SelectItem value="archipelago">Archipelago</SelectItem>
@@ -129,23 +127,23 @@ export default function CivilizationSettingsSheet({
                     </Select>
                   </LabeledField>
                   <LabeledField label="Width">
-                    <Input type="number" min="24" max="256" value={settings.world?.width ?? 128} onChange={(event) => onUpdateWorld({ width: Number(event.target.value) })} />
+                    <Input type="number" min="24" max="256" value={settings.world?.width ?? 128} onChange={(event) => onUpdateWorld({ width: Number(event.target.value) })} className="h-8" />
                   </LabeledField>
                   <LabeledField label="Height">
-                    <Input type="number" min="24" max="256" value={settings.world?.height ?? 128} onChange={(event) => onUpdateWorld({ height: Number(event.target.value) })} />
+                    <Input type="number" min="24" max="256" value={settings.world?.height ?? 128} onChange={(event) => onUpdateWorld({ height: Number(event.target.value) })} className="h-8" />
                   </LabeledField>
-                  <LabeledField label="Coastline bias">
-                    <Input type="number" min="0" max="100" value={settings.world?.coastlineBias ?? 58} onChange={(event) => onUpdateWorld({ coastlineBias: Number(event.target.value) })} />
+                  <LabeledField label="Coastline">
+                    <Input type="number" min="0" max="100" value={settings.world?.coastlineBias ?? 58} onChange={(event) => onUpdateWorld({ coastlineBias: Number(event.target.value) })} className="h-8" />
                   </LabeledField>
-                  <LabeledField label="River count">
-                    <Input type="number" min="0" max="20" value={settings.world?.riverCount ?? 8} onChange={(event) => onUpdateWorld({ riverCount: Number(event.target.value) })} />
+                  <LabeledField label="Rivers">
+                    <Input type="number" min="0" max="20" value={settings.world?.riverCount ?? 8} onChange={(event) => onUpdateWorld({ riverCount: Number(event.target.value) })} className="h-8" />
                   </LabeledField>
-                  <LabeledField label="Run duration (sec)">
-                    <Input type="number" min="10" max="1800" value={settings.world?.run_duration_seconds ?? 80} onChange={(event) => onUpdateWorld({ run_duration_seconds: Number(event.target.value) })} />
+                  <LabeledField label="Duration (sec)">
+                    <Input type="number" min="10" max="1800" value={settings.world?.run_duration_seconds ?? 80} onChange={(event) => onUpdateWorld({ run_duration_seconds: Number(event.target.value) })} className="h-8" />
                   </LabeledField>
-                  <LabeledField label="Playback speed">
+                  <LabeledField label="Speed">
                     <Select value={String(settings.world?.playback_speed ?? 1)} onValueChange={(value) => onUpdateWorld({ playback_speed: Number(value) })}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="1">1x</SelectItem>
                         <SelectItem value="2">2x</SelectItem>
@@ -155,32 +153,45 @@ export default function CivilizationSettingsSheet({
                   </LabeledField>
                 </CardContent>
               </Card>
-            </TabsContent>
 
-            <TabsContent value="connection" className="m-0 px-6 py-5">
-              <ConnectionTab
-                opencodeCatalog={opencodeCatalog}
-                opencodeZenKeyDraft={opencodeZenKeyDraft}
-                onOpencodeZenKeyDraftChange={onOpencodeZenKeyDraftChange}
-                onUpdateProviderConnection={onUpdateProviderConnection}
-                onRefreshOpencodeZen={onRefreshCatalogs}
-                onCopyCommand={(cmd) => onAction("Command", cmd)}
-                groups={settings.groups}
-                providers={settings.providers}
-              />
-            </TabsContent>
-
-            <TabsContent value="groups" className="m-0 px-6 py-5">
-              <OpenCodeConnectionBanner
-                opencodeCatalog={opencodeCatalog}
-                groups={groups}
-                onSwitchTab={() => onTabChange("connection")}
-              />
+              {/* ── POPULATION COUNTER ── */}
+              <div className={`mb-4 flex items-center gap-3 rounded-2xl border px-4 py-3 ${
+                populationOver
+                  ? "border-red-500/30 bg-red-500/10"
+                  : populationWarn
+                    ? "border-amber-500/20 bg-amber-500/8"
+                    : "border-white/8 bg-white/3"
+              }`}>
+                <div className={`flex size-9 items-center justify-center rounded-xl ${
+                  populationOver ? "bg-red-500/15" : populationWarn ? "bg-amber-500/10" : "bg-white/5"
+                }`}>
+                  <UserRoundCog className={`size-5 ${
+                    populationOver ? "text-red-300" : populationWarn ? "text-amber-300" : "text-zinc-400"
+                  }`} />
+                </div>
+                <div className="flex-1">
+                  <p className={`text-sm font-semibold ${
+                    populationOver ? "text-red-100" : populationWarn ? "text-amber-100" : "text-zinc-200"
+                  }`}>
+                    Humans: {population} / {STRICT_MAX_TOTAL_POPULATION} max
+                  </p>
+                  {populationOver ? (
+                    <p className="text-xs text-red-200/80">Strict mode supports up to {STRICT_MAX_TOTAL_POPULATION} humans total. Remove some before running.</p>
+                  ) : populationWarn ? (
+                    <p className="text-xs text-amber-200/60">Approaching the limit — strict mode caps at {STRICT_MAX_TOTAL_POPULATION} humans to avoid rate limiting.</p>
+                  ) : (
+                    <p className="text-xs text-zinc-500">Each group contributes to the total population count.</p>
+                  )}
+                </div>
+                {populationOver ? (
+                  <AlertTriangle className="size-5 shrink-0 text-red-300" />
+                ) : null}
+              </div>
 
               <div className="mb-4 flex items-center justify-between gap-3">
                 <div>
                   <h3 className="text-base font-semibold text-zinc-100">Human groups</h3>
-                  <p className="text-sm text-zinc-400">Each group is a community. Every human inside it inherits the same AI controller. Strict AI-only mode is designed for up to 8 humans total.</p>
+                  <p className="text-sm text-zinc-400">Each group is a community. Every human inside it inherits the same AI controller.</p>
                 </div>
                 <div className="flex gap-2">
                   {!nameValidation?.valid ? (
@@ -204,7 +215,7 @@ export default function CivilizationSettingsSheet({
 
               <div className="space-y-6">
                 {groups.map((group) => (
-                  <Card key={group.id} className="border-white/6 bg-white/2 shadow-[0_12px_40px_rgba(0,0,0,0.5)] backdrop-blur-2xl rounded-[20px]">
+                  <Card key={group.id} className="border-white/10 bg-linear-to-br from-white/4 to-white/1 shadow-[0_16px_40px_rgba(0,0,0,0.4)] backdrop-blur-3xl rounded-[20px] transition-all duration-300">
                     <CardHeader>
                       <div className="flex items-start justify-between gap-4">
                         <div className="flex items-start gap-3">
@@ -248,8 +259,11 @@ export default function CivilizationSettingsSheet({
                         status={controllerReadiness(group.controller, providerCatalogs[`group:${group.id}`], settings.providers)}
                         catalog={providerCatalogs[`group:${group.id}`] ?? null}
                         opencodeCatalog={opencodeCatalog}
-                        onPatchController={(patch) => onPatchGroupController(group.id, patch)}
+                        onPatchController={(patch) => onUpdateGroupController(group.id, patch)}
                         onUpdateProviderConnection={onUpdateProviderConnection}
+                        onRefreshCatalogs={onRefreshCatalogs}
+                        onConnectOpencode={onConnectOpencode}
+                        globalProviders={settings.providers}
                       />
 
 
@@ -266,11 +280,28 @@ export default function CivilizationSettingsSheet({
                 ))}
               </div>
             </TabsContent>
+
+            {/* ── REVIEW TAB ── */}
+            <TabsContent value="review" className="m-0 h-full focus-visible:outline-none px-6 py-5">
+              <ReviewPanel
+                settings={settings}
+                groups={groups}
+                providerCatalogs={providerCatalogs}
+                opencodeCatalog={opencodeCatalog}
+                population={population}
+                populationOver={populationOver}
+                nameValidation={nameValidation}
+                busy={busy}
+                onSaveSettings={onSaveSettings}
+                onGenerateWorld={onGenerateWorld}
+                onTabChange={onTabChange}
+              />
+            </TabsContent>
           </ScrollArea>
 
-          <SheetFooter className="border-t border-white/20 px-6 py-4 sm:justify-between">
-            <div className="text-sm text-zinc-500">
-              Save to persist the human-group setup, or generate immediately to preview the world.
+          <SheetFooter className="border-t border-white/10 bg-black/20 px-6 py-4 sm:justify-between">
+            <div className="text-sm text-zinc-400">
+              {activeTab === "groups" ? "Configure groups and controllers" : "Review settings and run simulation"}
             </div>
             <div className="flex gap-2">
               <Button variant="outline" onClick={onGenerateWorld} disabled={busy}>Generate world</Button>
@@ -290,6 +321,9 @@ function ControllerCard({
   opencodeCatalog,
   onPatchController,
   onUpdateProviderConnection,
+  onRefreshCatalogs,
+  onConnectOpencode,
+  globalProviders,
 }) {
   const controller = group.controller ?? {};
   const provider = controller?.provider ?? "heuristic";
@@ -314,7 +348,7 @@ function ControllerCard({
   const setupDetail = setupGuide.detail;
 
   return (
-    <Card className="border-white/6 bg-white/3 backdrop-blur-2xl shadow-[0_12px_40px_rgba(0,0,0,0.5)] rounded-[20px]">
+    <Card className="border-white/10 bg-linear-to-br from-white/5 to-transparent backdrop-blur-2xl rounded-2xl shadow-[0_8px_32px_rgba(0,0,0,0.2)]">
       <CardHeader className="pb-3">
         <div className="flex items-start justify-between gap-4">
           <div className="flex items-center gap-3">
@@ -356,6 +390,18 @@ function ControllerCard({
           </Select>
         </LabeledField>
 
+        <InlineConnectionPanel
+          provider={provider}
+          controller={controller}
+          catalog={catalog}
+          opencodeCatalog={opencodeCatalog}
+          onPatchController={onPatchController}
+          onUpdateProviderConnection={onUpdateProviderConnection}
+          onRefreshCatalogs={onRefreshCatalogs}
+          onConnectOpencode={onConnectOpencode}
+          globalProviders={globalProviders}
+        />
+
         <LabeledField label="Model Selection">
           <ProviderModelChooser
             provider={provider}
@@ -390,6 +436,8 @@ function ConnectionTab({
   onOpencodeZenKeyDraftChange,
   onUpdateProviderConnection,
   onRefreshOpencodeZen,
+  onDisconnectOpencodeZen,
+  onAction,
   onCopyCommand,
   groups,
   providers,
@@ -402,7 +450,7 @@ function ConnectionTab({
   return (
     <div className="space-y-6">
       {/* ── OPENCODE ZEN ── */}
-      <Card className="border-white/6 bg-white/3 backdrop-blur-2xl shadow-[0_12px_40px_rgba(0,0,0,0.5)] rounded-[20px]">
+      <Card className="border-white/10 bg-linear-to-br from-white/5 to-transparent backdrop-blur-2xl rounded-2xl shadow-[0_8px_32px_rgba(0,0,0,0.2)]">
         <CardHeader>
           <div className="flex items-start justify-between gap-4">
             <div className="flex items-center gap-3">
@@ -448,6 +496,26 @@ function ConnectionTab({
             </div>
 
           </LabeledField>
+          {opencodeConnected ? (
+            <div className="flex items-center justify-between rounded-xl border border-white/6 bg-white/2 px-4 py-3">
+              <div>
+                <p className="text-xs font-medium text-zinc-300">Connected to OpenCode Zen</p>
+                <p className="text-[11px] text-zinc-500">Clear the stored credential and start fresh if something is wrong.</p>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                className="shrink-0 border-red-500/20 text-red-200 hover:bg-red-500/10 hover:border-red-500/30"
+                onClick={() => {
+                  if (onDisconnectOpencodeZen) onDisconnectOpencodeZen();
+                  if (onOpencodeZenKeyDraftChange) onOpencodeZenKeyDraftChange("");
+                }}
+              >
+                <RotateCcw className="size-3.5" />
+                Reset Connection
+              </Button>
+            </div>
+          ) : null}
         </CardContent>
       </Card>
 
@@ -459,6 +527,7 @@ function ConnectionTab({
           icon={<Zap className="size-5 text-emerald-400" />}
           config={providers?.openai}
           onUpdate={(patch) => onUpdateProviderConnection("openai", patch)}
+          onAction={onAction}
         />
         <ProviderCredentialCard 
           provider="anthropic"
@@ -466,6 +535,7 @@ function ConnectionTab({
           icon={<Shield className="size-5 text-purple-400" />}
           config={providers?.anthropic}
           onUpdate={(patch) => onUpdateProviderConnection("anthropic", patch)}
+          onAction={onAction}
         />
         <ProviderCredentialCard 
           provider="gemini-api"
@@ -473,6 +543,7 @@ function ConnectionTab({
           icon={<Sparkles className="size-5 text-blue-400" />}
           config={providers?.["gemini-api"]}
           onUpdate={(patch) => onUpdateProviderConnection("gemini-api", patch)}
+          onAction={onAction}
         />
         <ProviderCredentialCard 
           provider="gemini-cli"
@@ -480,19 +551,28 @@ function ConnectionTab({
           icon={<Terminal className="size-5 text-zinc-400" />}
           config={providers?.["gemini-cli"]}
           onUpdate={(patch) => onUpdateProviderConnection("gemini-cli", patch)}
+          onAction={onAction}
           hideUrl
+        />
+        <ProviderCredentialCard 
+          provider="groq"
+          label="Groq API"
+          icon={<Cpu className="size-5 text-orange-400" />}
+          config={providers?.groq}
+          onUpdate={(patch) => onUpdateProviderConnection("groq", patch)}
+          onAction={onAction}
         />
       </div>
     </div>
   );
 }
 
-function ProviderCredentialCard({ provider, label, icon, config, onUpdate, hideUrl = false }) {
+function ProviderCredentialCard({ provider, label, icon, config, onUpdate, onAction, hideUrl = false }) {
   const [apiKey, setApiKey] = useState(config?.apiKey || "");
   const [baseUrl, setBaseUrl] = useState(config?.baseUrl || "");
 
   return (
-    <Card className="border-white/6 bg-white/2 backdrop-blur-xl rounded-[20px] overflow-hidden transition-all hover:bg-white/4">
+    <Card className="border-white/10 bg-linear-to-br from-white/4 to-transparent backdrop-blur-2xl rounded-2xl overflow-hidden transition-all duration-300 hover:bg-white/6 hover:border-white/20 hover:shadow-[0_8px_32px_rgba(0,0,0,0.4)]">
       <CardHeader className="pb-3">
         <div className="flex items-center gap-3">
           <div className="flex size-9 items-center justify-center rounded-lg bg-white/5 border border-white/5">
@@ -501,7 +581,7 @@ function ProviderCredentialCard({ provider, label, icon, config, onUpdate, hideU
           <CardTitle className="text-sm font-semibold">{label}</CardTitle>
         </div>
       </CardHeader>
-      <CardContent className="space-y-3">
+      <CardContent className="space-y-4">
         <LabeledField label="Global API Key">
           <Input 
             type="password" 
@@ -511,6 +591,19 @@ function ProviderCredentialCard({ provider, label, icon, config, onUpdate, hideU
             className="h-8 text-xs bg-black/20"
           />
         </LabeledField>
+
+        {provider === "gemini-cli" && (
+          <Button 
+            variant="outline" 
+            size="sm" 
+            className="w-full h-8 text-[11px] border-blue-500/20 text-blue-200 hover:bg-blue-500/10"
+            onClick={() => onAction?.({ type: "GEMINI_CLI_LOGIN" })}
+          >
+            <ExternalLink className="mr-2 size-3" />
+            Launch Browser Login
+          </Button>
+        )}
+
         {!hideUrl && (
           <LabeledField label="Proxy / Base URL (Optional)">
             <Input 
@@ -563,30 +656,42 @@ function OpenCodeConnectionBanner({ opencodeCatalog, groups, onSwitchTab }) {
 }
 
 function formatReadinessState(state) {
-  return String(state ?? "unknown").replaceAll("_", " ");
+  const actionable = {
+    not_connected: "Not connected — paste your key to connect",
+    model_required: "Choose a model to continue",
+    missing_api_key: "API key missing — add it in the Connection step",
+    login_required: "Login required — connect your provider first",
+    runtime_unavailable: "Model didn't respond — try reconnecting or pick another",
+    rate_limited: "Rate limited — wait a few minutes or switch models",
+    broken_environment: "Environment corrupted — reset connection below",
+    duplicate_names: "Fix duplicate human names before running",
+    network_issue: "Network error — check your connection and retry",
+    not_installed: "CLI not installed — install it or choose a different provider",
+  };
+  return actionable[state] ?? String(state ?? "unknown").replaceAll("_", " ");
 }
 
 function formatOpenCodeStatus(state) {
-  if (state === "runtime_unavailable") return "Runtime blocked";
-  if (state === "network_issue") return "Network issue";
-  if (state === "not_connected") return "Connect Zen";
-  if (state === "rate_limited") return "Rate limited";
-  if (state === "hosted_model_unavailable") return "Hosted model blocked";
-  if (state === "provider_backed_model_unavailable") return "Provider-backed model blocked";
-  if (state === "connected_no_models") return "Connected, no models";
-  if (state === "model_required") return "Choose model";
-  if (state === "login_required") return "Connect OpenCode";
+  if (state === "runtime_unavailable") return "Model not responding — reconnect or switch";
+  if (state === "network_issue") return "Network error — check connection";
+  if (state === "not_connected") return "Paste key to connect";
+  if (state === "rate_limited") return "Rate limited — wait or switch model";
+  if (state === "hosted_model_unavailable") return "Hosted model blocked — try another";
+  if (state === "provider_backed_model_unavailable") return "Provider model blocked — try another";
+  if (state === "connected_no_models") return "Connected — no models available";
+  if (state === "model_required") return "Choose a model";
+  if (state === "login_required") return "Connect OpenCode first";
   if (state === "ready") return "Ready to run";
   return formatReadinessState(state);
 }
 
 function formatSelectedModelError(category, fallback = "") {
-  if (category === "quota_limited") return fallback || "This OpenCode-hosted model is currently rate limited or out of quota.";
-  if (category === "auth_required") return fallback || "This model needs account access or login before it can run.";
-  if (category === "provider_unavailable") return fallback || "This model is temporarily unavailable from OpenCode right now.";
-  if (category === "network_issue") return fallback || "GridNomad could not reach OpenCode for this model.";
-  if (category === "broken_environment") return fallback || "Your local OpenCode environment is broken.";
-  return fallback || "This model could not answer the verification prompt.";
+  if (category === "quota_limited") return fallback || "This model is rate limited or out of quota. Wait a few minutes or switch models.";
+  if (category === "auth_required") return fallback || "This model needs account access. Check your login in the Connection step.";
+  if (category === "provider_unavailable") return fallback || "This model is temporarily unavailable. Try a different model.";
+  if (category === "network_issue") return fallback || "GridNomad couldn't reach the provider. Check your network and retry.";
+  if (category === "broken_environment") return fallback || "Your local environment is corrupted. Click 'Reset Connection' to start fresh.";
+  return fallback || "This model didn't answer the verification prompt. Try reconnecting or pick another model.";
 }
 
 function buildOpencodeModelLabel(modelId = "") {
@@ -703,6 +808,21 @@ function describeControllerSetup(provider, readinessState, catalog, selectedMode
     };
   }
 
+  if (provider === "groq") {
+    if (readinessState === "ready") {
+      return {
+        title: "Groq model verified",
+        description: "The selected Groq model is ready to provide ultra-fast inference for this group.",
+        detail: selectedModel ? `Selected model: ${selectedModel}.` : "",
+      };
+    }
+    return {
+      title: "Choose a Groq model",
+      description: "Pick a high-performance Llama 3 or Mixtral model from Groq.",
+      detail: "",
+    };
+  }
+
   if (readinessState === "missing_api_key") {
     return {
       title: "Credential required",
@@ -764,6 +884,8 @@ function buildUnifiedModelEntries({ catalog, opencodeCatalog, controller }) {
 
   const opencodeEntries = Array.isArray(opencodeCatalog?.model_entries) ? opencodeCatalog.model_entries : [];
   const opencodeEntryMap = new Map();
+  const isOpenCodeConnected = opencodeCatalog?.health_state === "ready" || opencodeCatalog?.health_state === "rate_limited";
+
   for (const entry of opencodeEntries) {
     const model = String(entry?.id ?? entry?.model ?? "").trim();
     if (!model) {
@@ -778,12 +900,14 @@ function buildUnifiedModelEntries({ catalog, opencodeCatalog, controller }) {
       provider: "opencode",
       model,
       label: entry?.label || buildOpencodeModelLabel(model),
-      category: "OpenCode runtime",
+      category: isOpenCodeConnected ? "OpenCode runtime" : "OpenCode (connect to see)",
       providerLabel: "OpenCode CLI",
       sourceType: entry?.source_type || "hosted",
       sourceBadge: entry?.source_type === "provider_backed" ? "Connected provider" : "Hosted by OpenCode",
       runtimeStatus: entry?.runtime_status || "",
-      description: entry?.source_type === "provider_backed" ? "Runs through OpenCode using a connected provider." : "Runs through the OpenCode Zen runtime.",
+      description: isOpenCodeConnected 
+        ? (entry?.source_type === "provider_backed" ? "Runs through OpenCode using a connected provider." : "Runs through the OpenCode Zen runtime.")
+        : "Connect in the panel above to see models",
     });
   }
 
@@ -834,6 +958,13 @@ function buildUnifiedModelEntries({ catalog, opencodeCatalog, controller }) {
       models: [...ANTHROPIC_MODELS, ...((catalog?.provider === "anthropic" ? catalog?.models : []) ?? []), ...((controller?.provider === "anthropic" ? controller?.availableModels : []) ?? [])],
       description: "Uses a direct Anthropic API key.",
     },
+    {
+      provider: "groq",
+      category: "Groq",
+      providerLabel: "Groq API",
+      models: [...GROQ_MODELS, ...((catalog?.provider === "groq" ? catalog?.models : []) ?? []), ...((controller?.provider === "groq" ? controller?.availableModels : []) ?? [])],
+      description: "Uses a direct Groq API key for ultra-fast inference.",
+    },
   ];
 
   for (const group of nativeModelGroups) {
@@ -852,78 +983,7 @@ function buildUnifiedModelEntries({ catalog, opencodeCatalog, controller }) {
   return entries;
 }
 
-function assembleControllerEntries(provider, catalog, opencodeCatalog, selectedModel) {
-  const entries = [];
-  
-  if (provider === "heuristic") {
-    entries.push({
-      label: "Internal Heuristic",
-      model: "default",
-      category: "Local Controllers",
-      provider: "heuristic",
-      providerLabel: "Heuristic",
-      description: "Direct algorithmic world-interaction logic with zero latency and no cost.",
-      runtimeStatus: "ready",
-      statusWeight: 10,
-    });
-    return entries;
-  }
-
-  if (provider === "opencode") {
-    const models = opencodeCatalog?.model_entries || [];
-    models.forEach((m) => {
-      entries.push({
-        label: m.label || m.model_id,
-        model: m.model_id,
-        category: "OpenCode Workspace",
-        provider: "opencode",
-        providerLabel: "OpenCode",
-        description: m.description || "Local model hosted via OpenCode Zen.",
-        runtimeStatus: m.status || "unverified",
-        sourceBadge: m.source || "local",
-        statusWeight: m.status === "ready" ? 10 : 5,
-      });
-    });
-    
-    // Add default placeholders if empty
-    if (!entries.length) {
-      OPENCODE_ZEN_MODELS.forEach((m) => {
-        entries.push({
-          label: m.label,
-          model: m.value,
-          category: "Common Models",
-          provider: "opencode",
-          providerLabel: "OpenCode",
-          description: "Model selection placeholder. Connect Zen to see live models.",
-          runtimeStatus: "not_connected",
-          statusWeight: 0,
-        });
-      });
-    }
-    return entries;
-  }
-
-  // Direct APIs
-  const staticModels = provider === "openai" ? OPENAI_MODELS : 
-                       provider === "anthropic" ? ANTHROPIC_MODELS : 
-                       provider === "gemini-api" ? GEMINI_API_MODELS : 
-                       provider === "gemini-cli" ? GEMINI_MODELS : [];
-                       
-  staticModels.forEach((m) => {
-    entries.push({
-      label: m.label,
-      model: m.value,
-      category: `${providerDisplayName(provider)} Standard`,
-      provider: provider,
-      providerLabel: providerDisplayName(provider),
-      description: `Direct connection to ${m.label}.`,
-      runtimeStatus: "ready",
-      statusWeight: 10,
-    });
-  });
-
-  return entries;
-}
+// assembleControllerEntries was deprecated in favor of buildUnifiedModelEntries
 
 
 function describeCredentialPanel(provider, selectedModel, selectedEntry) {
@@ -949,6 +1009,7 @@ function buildApiKeyLabel(provider) {
   if (provider === "openai") return "OpenAI API key";
   if (provider === "anthropic") return "Anthropic API key";
   if (provider === "gemini-api") return "Gemini API key";
+  if (provider === "groq") return "Groq API key";
   return "API key";
 }
 
@@ -978,15 +1039,19 @@ function ProviderModelChooser({
   const [query, setQuery] = useState("");
   
   const entries = useMemo(
-    () => assembleControllerEntries(provider, catalog, opencodeCatalog, currentModel),
+    () => buildUnifiedModelEntries({ catalog, opencodeCatalog, provider, controller: { provider, availableModels: [] } }),
     [provider, catalog, opencodeCatalog, currentModel]
   );
   
   const selectedEntry = entries.find((e) => e.model === currentModel && e.provider === provider);
-
   const normalizedQuery = query.trim().toLowerCase();
-
   const filteredEntries = entries.filter((entry) => {
+    // ── FILTER BY PROVIDER ──
+    if (entry.provider !== provider) {
+      return false;
+    }
+    
+    // ── FILTER BY SEARCH QUERY ──
     if (!normalizedQuery) {
       return true;
     }
@@ -1011,12 +1076,11 @@ function ProviderModelChooser({
 
   return (
     <div className="grid gap-2">
-      <span className="text-[11px] uppercase tracking-[0.18em] text-zinc-500">Model</span>
       <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <p className="text-sm font-medium text-zinc-100">
-              {selectedEntry?.label || value || "No model selected"}
+              {selectedEntry?.label || currentModel || "No model selected"}
             </p>
             <p className="mt-1 text-xs leading-5 text-zinc-500">
               {selectedEntry
@@ -1034,8 +1098,8 @@ function ProviderModelChooser({
           <Input
             value={query}
             placeholder="Search by model, provider, or runtime"
-            onChange={(event) => onQueryChange(event.target.value)}
-            className="pl-9"
+            onChange={(event) => setQuery(event.target.value)}
+            className="pl-9 h-9 bg-black/20"
           />
         </div>
 
@@ -1052,7 +1116,7 @@ function ProviderModelChooser({
                 title={category}
                 entries={groupEntries}
                 selectedProvider={provider}
-                selectedModel={value}
+                selectedModel={currentModel}
                 onSelect={onSelect}
               />
             ))}
@@ -1074,7 +1138,7 @@ function ModelCategorySection({ title, entries, selectedProvider, selectedModel,
         const active = entry.provider === selectedProvider && entry.model === selectedModel;
         return (
           <button
-            key={entry.key}
+            key={`${entry.provider}-${entry.model}`}
             type="button"
             onClick={() => onSelect(entry.provider, entry.model)}
             className={`mb-1 flex w-full items-start justify-between rounded-xl px-3 py-3 text-left transition-colors ${
@@ -1287,5 +1351,304 @@ function LabeledField({ label, children }) {
       <span className="text-[11px] uppercase tracking-[0.18em] text-zinc-500">{label}</span>
       {children}
     </label>
+  );
+}
+
+function InlineConnectionPanel({
+  provider,
+  controller,
+  catalog,
+  opencodeCatalog,
+  onPatchController,
+  onUpdateProviderConnection,
+  onRefreshCatalogs,
+  onConnectOpencode,
+  globalProviders,
+}) {
+  const [connecting, setConnecting] = useState(false);
+  const [localApiKey, setLocalApiKey] = useState(controller?.apiKey ?? "");
+  const [localBaseUrl, setLocalBaseUrl] = useState(controller?.baseUrl ?? "");
+
+  useEffect(() => {
+    setLocalApiKey(controller?.apiKey ?? "");
+    setLocalBaseUrl(controller?.baseUrl ?? "");
+  }, [controller?.apiKey, controller?.baseUrl]);
+
+  if (provider === "heuristic") {
+    return (
+      <div className="rounded-xl border border-white/6 bg-white/2 px-3 py-2">
+        <div className="flex items-center gap-2">
+          <div className="size-2 rounded-full bg-zinc-500" />
+          <span className="text-[11px] text-zinc-400">Local heuristic — no connection needed</span>
+        </div>
+      </div>
+    );
+  }
+
+  const isOpenCode = provider === "opencode";
+  const needsApiKey = providerUsesApiKey(provider) || isOpenCode;
+  const needsBaseUrl = providerSupportsBaseUrl(provider);
+
+  const effectiveCatalog = isOpenCode ? opencodeCatalog : catalog;
+  const healthState = effectiveCatalog?.health_state;
+  
+  // For OpenCode: check healthState. For direct API: check if we have API key
+  const controllerHasApiKey = Boolean(controller?.apiKey?.trim());
+  const inputHasApiKey = Boolean(localApiKey.trim());
+  const isConnected = isOpenCode
+    ? healthState === "ready" || healthState === "rate_limited" || healthState === "model_required"
+    : controllerHasApiKey || inputHasApiKey;
+
+  const handleConnect = async () => {
+    if (!localApiKey.trim()) {
+      alert("Please enter an API key first");
+      return;
+    }
+    setConnecting(true);
+    try {
+      if (isOpenCode) {
+        await onConnectOpencode?.(localApiKey);
+        onRefreshCatalogs?.();
+      } else {
+        // Save API key to controller
+        onPatchController({ apiKey: localApiKey, baseUrl: localBaseUrl });
+        // Update global provider connection (stores key and refreshes catalog)
+        if (onUpdateProviderConnection) {
+          await onUpdateProviderConnection(provider, { apiKey: localApiKey, baseUrl: localBaseUrl });
+        }
+        // Trigger catalog refresh for this group
+        if (onRefreshCatalogs) {
+          onRefreshCatalogs();
+        }
+      }
+    } catch (err) {
+      alert("Connection error: " + err.message);
+    } finally {
+      setConnecting(false);
+    }
+  };
+
+  const handleClear = () => {
+    setLocalApiKey("");
+    setLocalBaseUrl("");
+    if (isOpenCode) {
+      onPatchController({ apiKey: "", baseUrl: "" });
+    } else {
+      onPatchController({ apiKey: "", baseUrl: "" });
+    }
+  };
+
+  if (!needsApiKey) {
+    return (
+      <div className="rounded-xl border border-white/6 bg-white/2 px-3 py-2">
+        <div className="flex items-center gap-2">
+          <div className="size-2 rounded-full bg-amber-400" />
+          <span className="text-[11px] text-zinc-400">Login required — click to authenticate</span>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <div className={`size-2 rounded-full ${isConnected ? "bg-emerald-400" : "bg-amber-400"}`} />
+          <span className="text-[11px] text-zinc-400">
+            {isConnected ? `${providerDisplayName(provider)} connected` : "Not connected"}
+          </span>
+        </div>
+        {isConnected && (
+          <Button variant="ghost" size="sm" onClick={handleClear} className="h-6 text-[10px] text-zinc-400 hover:text-red-300">
+            Clear
+          </Button>
+        )}
+      </div>
+
+      <div className="grid gap-2">
+        <Input
+          type="password"
+          placeholder={`${providerDisplayName(provider)} API key (sk-...)`}
+          value={localApiKey}
+          onChange={(e) => setLocalApiKey(e.target.value)}
+          className="h-9 bg-black/20 text-sm"
+        />
+        {needsBaseUrl && (
+          <Input
+            placeholder="Proxy / Base URL (optional)"
+            value={localBaseUrl}
+            onChange={(e) => setLocalBaseUrl(e.target.value)}
+            className="h-9 bg-black/20 text-sm"
+          />
+        )}
+      </div>
+
+      <Button
+        onClick={handleConnect}
+        disabled={!localApiKey.trim() || connecting}
+        className="w-full"
+        size="sm"
+      >
+        {connecting ? "Connecting..." : isConnected ? "Update Connection" : "Connect"}
+      </Button>
+
+      {healthState && !isConnected && healthState !== "not_connected" && (
+        <div className="text-[10px] text-amber-300">
+          Status: {formatOpenCodeStatus(healthState)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ConnectionSourceBadge({ provider, globalProviders, opencodeCatalog }) {
+  if (provider === "heuristic") {
+    return (
+      <div className="flex items-center gap-2 rounded-xl border border-white/6 bg-white/2 px-3 py-2">
+        <div className="size-2 rounded-full bg-zinc-500" />
+        <span className="text-[11px] text-zinc-400">Local heuristic — no connection needed</span>
+      </div>
+    );
+  }
+  if (provider === "opencode") {
+    const ocHealth = opencodeCatalog?.health_state ?? "not_connected";
+    const connected = ocHealth === "ready" || ocHealth === "rate_limited" || ocHealth === "model_required";
+    return (
+      <div className="flex items-center gap-2 rounded-xl border border-white/6 bg-white/2 px-3 py-2">
+        <div className={`size-2 rounded-full ${connected ? "bg-blue-400" : "bg-amber-400"}`} />
+        <span className="text-[11px] text-zinc-400">
+          {connected ? "Using OpenCode Zen connection" : "OpenCode Zen not connected — go to Step 1"}
+        </span>
+      </div>
+    );
+  }
+  if (DIRECT_API_PROVIDERS.includes(provider)) {
+    const hasKey = Boolean(globalProviders?.apiKey);
+    return (
+      <div className="flex items-center gap-2 rounded-xl border border-white/6 bg-white/2 px-3 py-2">
+        <div className={`size-2 rounded-full ${hasKey ? "bg-emerald-400" : "bg-amber-400"}`} />
+        <span className="text-[11px] text-zinc-400">
+          {hasKey
+            ? `Using global ${providerDisplayName(provider)} key`
+            : `No ${providerDisplayName(provider)} key configured — add one in Step 1`}
+        </span>
+      </div>
+    );
+  }
+  return null;
+}
+
+function ReviewPanel({
+  settings,
+  groups,
+  providerCatalogs,
+  opencodeCatalog,
+  population,
+  populationOver,
+  nameValidation,
+  busy,
+  onSaveSettings,
+  onGenerateWorld,
+  onTabChange,
+}) {
+  const providers = settings.providers ?? {};
+  const allReady = groups.length > 0 && groups.every((g) => {
+    const status = controllerReadiness(g.controller, providerCatalogs[`group:${g.id}`] ?? null, providers);
+    return status.state === "ready";
+  });
+  const canRun = allReady && !populationOver && (nameValidation?.valid !== false);
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h3 className="text-base font-semibold text-zinc-100">Review & Run</h3>
+        <p className="text-sm text-zinc-400">Verify all groups are configured, then save and run your simulation.</p>
+      </div>
+
+      {/* ── READINESS SUMMARY ── */}
+      <Card className="border-white/10 bg-linear-to-br from-white/5 to-transparent backdrop-blur-2xl rounded-2xl shadow-[0_8px_32px_rgba(0,0,0,0.2)]">
+        <CardContent className="p-5 space-y-4">
+          <div className={`flex items-center gap-3 rounded-xl p-4 ${
+            canRun
+              ? "border border-emerald-500/20 bg-emerald-500/8"
+              : "border border-amber-500/20 bg-amber-500/8"
+          }`}>
+            <div className={`flex size-10 items-center justify-center rounded-xl ${
+              canRun ? "bg-emerald-500/15" : "bg-amber-500/15"
+            }`}>
+              {canRun
+                ? <Check className="size-5 text-emerald-300" />
+                : <AlertTriangle className="size-5 text-amber-300" />}
+            </div>
+            <div>
+              <p className={`text-sm font-semibold ${canRun ? "text-emerald-100" : "text-amber-100"}`}>
+                {canRun ? "All systems ready" : "Setup incomplete"}
+              </p>
+              <p className={`text-xs ${canRun ? "text-emerald-200/60" : "text-amber-200/60"}`}>
+                {canRun
+                  ? `${groups.length} groups, ${population} humans — ready to stream.`
+                  : "Fix the issues below before running."}
+              </p>
+            </div>
+          </div>
+
+          {/* ── GROUP STATUS LIST ── */}
+          <div className="space-y-2">
+            {groups.map((group) => {
+              const status = controllerReadiness(group.controller, providerCatalogs[`group:${group.id}`] ?? null, providers);
+              const isReady = status.state === "ready";
+              return (
+                <div key={group.id} className="flex items-center justify-between gap-3 rounded-xl border border-white/6 bg-white/2 px-4 py-3">
+                  <div className="flex items-center gap-3">
+                    <div className="size-4 rounded-md border border-white/10" style={{ backgroundColor: group.color }} />
+                    <div>
+                      <p className="text-sm font-medium text-zinc-100">{group.name}</p>
+                      <p className="text-[11px] text-zinc-500">
+                        {group.population_count} humans · {group.controller?.model || providerDisplayName(group.controller?.provider ?? "heuristic")}
+                      </p>
+                    </div>
+                  </div>
+                  <Badge
+                    variant={isReady ? "default" : "outline"}
+                    className={isReady
+                      ? "border-emerald-500/30 bg-emerald-500/15 text-emerald-100 text-[10px]"
+                      : "border-amber-500/30 bg-amber-500/10 text-amber-100 text-[10px]"
+                    }
+                  >
+                    {isReady ? "● Ready" : formatReadinessState(status.state)}
+                  </Badge>
+                </div>
+              );
+            })}
+          </div>
+
+          {!groups.length ? (
+            <div className="rounded-xl border border-dashed border-white/10 bg-black/20 px-4 py-6 text-center text-sm text-zinc-500">
+              No groups configured. <button type="button" className="text-zinc-300 underline" onClick={() => onTabChange("groups")}>Add a group</button> first.
+            </div>
+          ) : null}
+
+          {populationOver ? (
+            <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-xs text-red-100">
+              <p className="font-medium">Population exceeds strict limit ({population} / {STRICT_MAX_TOTAL_POPULATION}).</p>
+              <p className="mt-1 text-red-200/80">Remove humans from groups in <button type="button" className="underline" onClick={() => onTabChange("groups")}>Step 2</button>.</p>
+            </div>
+          ) : null}
+
+          {nameValidation?.valid === false ? (
+            <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-xs text-red-100">
+              <p className="font-medium">Name validation failed.</p>
+              <p className="mt-1 text-red-200/80">{nameValidation.message}</p>
+            </div>
+          ) : null}
+        </CardContent>
+      </Card>
+
+      {/* ── ACTIONS ── */}
+      <div className="flex gap-3">
+        <Button variant="outline" className="flex-1" onClick={onGenerateWorld} disabled={busy}>Generate world</Button>
+        <Button className="flex-1" onClick={onSaveSettings} disabled={busy || !nameValidation?.valid}>Save settings</Button>
+      </div>
+    </div>
   );
 }
